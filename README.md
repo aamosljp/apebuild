@@ -1,11 +1,20 @@
 # ApeBuild
 
-A single header build system.
+A single header C/C++ build system.
 
 # Usage
 
 Just include apebuild.h in one source file, see the top of that file for
-more instructions
+more instructions.
+
+You can also check the example in apebuild.c to see it in action. Build it using:
+```
+gcc -o apebuild apebuild.c
+```
+And then run apebuild:
+```
+./apebuild
+```
 
 # Contributing
 
@@ -15,5 +24,5 @@ implemented
 
 # TODO
 
-[ ] Make cross-platform (it's currently linux-only, haven't tested on macos)
-[ ] Actually make building libraries work
+- [ ] Make cross-platform (it's currently linux-only, haven't tested on macos)
+- [ ] Actually make building libraries work
