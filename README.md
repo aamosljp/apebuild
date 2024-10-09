@@ -24,5 +24,5 @@ implemented
 
 # TODO
 
-- [ ] Make cross-platform (it's currently linux-only, haven't tested on macos)
+- [ ] Make cross-platform (Should work on windows now, haven't tested it though)
 - [ ] Actually make building libraries work

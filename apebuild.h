@@ -219,12 +219,12 @@
 	There are also functions for detecting when something needs to be rebuilt:
 		These are automatically called by ape_build_*
 
-		ape_needs_rebuild(outfile, infile)
+		ape_needs_rebuild1(outfile, infile)
 			outfile is a path to the file that should(maybe) be built
 			infile is a path to the file to build from
 			returns 1 if outfile needs to be rebuilt, otherwise, returns 0
 
-		ape_needs_rebuild1(outfile, infiles)
+		ape_needs_rebuild(outfile, infiles)
 			outfile is a path to the file that should(maybe) be built
 			infiles is an ApeStrList dynamic array containing all the files
 			outfile should be built from
@@ -319,8 +319,22 @@
 #include <assert.h>
 #include <wait.h>
 #include <stdbool.h>
-#include <dirent.h>
 #include <sys/stat.h>
+#ifndef _WIN32
+#include <dirent.h>
+#else
+#define WIN32_LEAN_AND_MEAN
+#include "windows.h"
+
+struct dirent {
+	char d_name[MAX_PATH + 1];
+};
+
+static DIR *opendir(const char *dirpath);
+static struct dirent *readdir(DIR *dirp);
+static int closedir(DIR *dirp);
+
+#endif
 
 #define BOLD "\x1b[1m"
 #define FG_RED "\x1b[31m"
@@ -440,11 +454,19 @@ void ape_cmd_render(ApeCmd cmd, ApeStrBuilder *render)
 	}
 }
 
-int ape_run_cmd_async(ApeCmd cmd)
+#ifdef _WIN32
+typedef HANDLE ApeProc;
+#define APE_INVALID_PROC INVALID_HANDLE_VALUE
+#else
+typedef int ApeProc;
+#define APE_INVALID_PROC (-1)
+#endif
+
+ApeProc ape_run_cmd_async(ApeCmd cmd)
 {
 	if (cmd.count < 1) {
 		APEERROR("Can't execute empty command");
-		return -1;
+		return APE_INVALID_PROC;
 	}
 	ApeStrBuilder sb = { 0 };
 	ape_cmd_render(cmd, &sb);
@@ -452,10 +474,38 @@ int ape_run_cmd_async(ApeCmd cmd)
 	APEINFO("CMD: %s", sb.items);
 	ape_da_free(sb);
 	memset(&sb, 0, sizeof(sb));
+
+#ifdef _WIN32
+	STARTUPINFO siStartInfo;
+	ZeroMemory(&siStartInfo, sizeof(siStartInfo));
+	siStartInfo.cb = sizeof(STARTUPINFO);
+	siStartInfo.hStdError = GetStdHandle(STD_ERROR_HANDLE);
+	siStartInfo.hStdOutput = GetStdHandle(STD_OUTPUT_HANDLE);
+	siStartInfo.hStdInput = GetStdHandle(STD_INPUT_HANDLE);
+	siStartInfo.dwFlags |= STARTF_USESTDHANDLES
+
+		PROCESS_INFORMATION piProcInfo;
+	ZeroMemory(&piProcInfo, sizeof(PROCESS_INFORMATION));
+
+	ape_cmd_render(cmd, &sb);
+	ape_da_append(&sb, '\0');
+	BOOL bSuccess = CreateProcessA(NULL, sb.items, NULL, NULL, TRUE, 0,
+				       NULL, NULL, &siStartInfo, &piProcInfo);
+	ape_da_free(sb);
+
+	if (!bSuccess) {
+		APEERROR("Could not create child process: %lu", GetLastError());
+		return APE_INVALID_PROC;
+	}
+
+	CloseHandle(piProcInfo.hThread);
+	return piProcInfo.hProcess;
+#else
+
 	pid_t cpid = fork();
 	if (cpid < 0) {
 		APEERROR("Could not fork child process: %s", strerror(errno));
-		return -1;
+		return APE_INVALID_PROC;
 	}
 	if (cpid == 0) {
 		ApeCmd cmd_null = { 0 };
@@ -469,12 +519,38 @@ int ape_run_cmd_async(ApeCmd cmd)
 		assert(0 && "Ureachable");
 	}
 	return cpid;
+#endif
 }
 
 bool ape_proc_wait(int proc)
 {
 	if (proc == -1)
 		return false;
+#ifdef _WIN32
+	DWORD result = WaitForSingleObject(proc, INFINITE);
+	if (result == WAIT_FAILED) {
+		APEERROR("Could not wait on child process: %lu",
+			 GetLastError());
+		return false;
+	}
+
+	DWORD exit_status : if (!GetExitCodeProcess(proc, &exit_status))
+	{
+		APEERROR("Could not get process exit code: %lu",
+			 GetLastError());
+		return false;
+	}
+
+	if (exit_status != 0) {
+		APEERROR("Command exited with exit code: %lu", exit_status);
+		return false;
+	}
+
+	CloseHandle(proc);
+
+	return true;
+#else
+
 	for (;;) {
 		int wstatus = 0;
 		if (waitpid(proc, &wstatus, 0) < 0) {
@@ -498,6 +574,7 @@ bool ape_proc_wait(int proc)
 		}
 	}
 	return true;
+#endif
 }
 
 bool ape_cmd_run_sync(ApeCmd cmd)
@@ -703,26 +780,51 @@ int ape_build_tests_append_dir(char *name, char *path)
 					      .libs = { 0 },         \
 					      .includes = { 0 } })
 
-int ape_needs_rebuild(const char *outfile, const char *infile)
+int ape_needs_rebuild(const char *outfile, ApeStrList *infiles)
 {
-	struct stat ins;
-	struct stat outs;
-	if (stat(infile, &ins) != 0) {
-		APEERROR("Failed to get stat (of file %s): %s", infile,
-			 strerror(errno));
-		return 1;
+#ifdef _WIN32
+	BOOL bSuccess;
+	HANDLE outpath_fd = CreateFile(outfile, GENERIC_READ, 0, NULL,
+				       OPEN_EXISTING, FILE_ATTRIBUTE_READONLY,
+				       NULL);
+	if (outpath_fd == INVALID_HANDLE_VALUE) {
+		if (GetLastError() == ERROR_FILE_NOT_FOUND)
+			return 1;
+		APEERROR("Could not open file %s: %lu", outfile,
+			 GetLastError());
+		return -1;
 	}
-	if (stat(outfile, &outs) != 0) {
-		return 1;
+	FILETIME outpath_time;
+	bSuccess = GetFileTime(outfile, NULL, NULL, &outpath_time);
+	CloseHandle(outpath_fd);
+	if (!bSuccess) {
+		APEERROR("Could not get time of %s: %lu", outfile,
+			 GetLastError());
+		return -1;
 	}
-	if (ins.st_mtime > outs.st_mtime) {
-		return 1;
+	for (size_t i = 0; i < infiles->count; i++) {
+		const char *infile = infiles->items[i];
+		HANDLE inpath_fd = CreateFile(infile, GENERIC_READ, 0, NULL,
+					      OPEN_EXISTING,
+					      FILE_ATTRIBUTE_READONLY, NULL);
+		if (inpath_fd == INVALID_HANDLE_VALUE) {
+			APEERROR("Could not open file %s: %lu", infile,
+				 GetLastError());
+			return -1;
+		}
+		FILETIME inpath_time;
+		bSuccess = GetFileTime(inpath_fd, NULL, NULL, &inpath_time);
+		CloseHandle(inpath_fd);
+		if (!bSuccess) {
+			APEERROR("Could not get time of %s: %lu", infile,
+				 GetLastError());
+			return -1;
+		}
+		if (CompareFileTime(&inpath_time, &outpath_time) == 1)
+			return 1;
 	}
 	return 0;
-}
-
-int ape_needs_rebuild1(char *outfile, ApeStrList *infiles)
-{
+#else
 	struct stat outs;
 	if (stat(outfile, &outs) != 0) {
 		return 1;
@@ -739,6 +841,14 @@ int ape_needs_rebuild1(char *outfile, ApeStrList *infiles)
 		}
 	}
 	return 0;
+#endif
+}
+
+int ape_needs_rebuild1(const char *outfile, const char *infile)
+{
+	ApeStrList s = { 0 };
+	ape_da_append(&s, (char*)infile);
+	return ape_needs_rebuild(outfile, &s);
 }
 
 char *ape_build_file(ApeFile *file, ApeStrList *includes, ApeBuildTarget target)
@@ -747,7 +857,7 @@ char *ape_build_file(ApeFile *file, ApeStrList *includes, ApeBuildTarget target)
 	ape_sb_append_str(&outfname, strdup(file->filename));
 	ape_sb_append_str(&outfname, ".o");
 	ape_da_append(&outfname, '\0');
-	if (!ape_needs_rebuild(outfname.items, file->filename))
+	if (!ape_needs_rebuild1(outfname.items, file->filename))
 		return outfname.items;
 	ApeCmd cmd = { 0 };
 #ifdef APELANGC
@@ -840,7 +950,7 @@ void ape_build_target(char *name, ApeBuildTarget target)
 	}
 	ApeStrList obj =
 		ape_build_sources(&(ab->infiles), &(ab->includes), target);
-	if (obj.count > 0 && ape_needs_rebuild1(ab->outname, &obj)) {
+	if (obj.count > 0 && ape_needs_rebuild(ab->outname, &obj)) {
 		ape_link_files(&obj, &(ab->libs), ab->outname, target);
 	} else {
 		APEINFO("No files to build");
@@ -854,7 +964,7 @@ void ape_build_all_target(ApeBuildTarget target)
 			&(ApeBuilds.items[i].infiles),
 			&(ApeBuilds.items[i].includes), target);
 		if (obj.count > 0 &&
-		    ape_needs_rebuild1(ApeBuilds.items[i].outname, &obj)) {
+		    ape_needs_rebuild(ApeBuilds.items[i].outname, &obj)) {
 			ape_link_files(&obj, &(ApeBuilds.items[i].libs),
 				       ApeBuilds.items[i].outname, target);
 		} else {
@@ -875,7 +985,7 @@ void ape_build_tests(char *name)
 	ApeStrList tobj = ape_build_sources(&(ab->testfiles), &(ab->includes),
 					    APE_TARGET_TEST);
 	ape_da_append_many(&obj, tobj.items, tobj.count);
-	if (obj.count > 0 && ape_needs_rebuild1(ab->outname, &obj)) {
+	if (obj.count > 0 && ape_needs_rebuild(ab->outname, &obj)) {
 		ape_link_files(&obj, &(ab->libs), ab->outname, APE_TARGET_TEST);
 	} else {
 		APEINFO("No files to build");
@@ -960,35 +1070,35 @@ int ape_rename(const char *oldname, const char *newname)
 
 #define _APE_REBUILD(binpath, srcpath) "gcc", "-o", binpath, srcpath
 
-#define APE_REBUILD(argc, argv)                                           \
-	do {                                                              \
-		const char *srcpath = __FILE__;                           \
-		assert(argc >= 1);                                        \
-		const char *binpath = argv[0];                            \
-		int rebuild_needed = ape_needs_rebuild(binpath, srcpath); \
-		if (rebuild_needed < 0)                                   \
-			exit(1);                                          \
-		if (rebuild_needed) {                                     \
-			ApeStrBuilder sb = { 0 };                         \
-			ape_sb_append_str(&sb, binpath);                  \
-			ape_sb_append_str(&sb, ".old");                   \
-			ape_da_append(&sb, '\0');                         \
-			if (!ape_rename(binpath, sb.items))               \
-				exit(1);                                  \
-			ApeCmd rebuild = { 0 };                           \
-			ape_cmd_append(&rebuild,                          \
-				       _APE_REBUILD(binpath, srcpath));   \
-			bool rebuilt = ape_cmd_run_sync(rebuild);         \
-			if (!rebuilt) {                                   \
-				ape_rename(sb.items, binpath);            \
-				exit(1);                                  \
-			}                                                 \
-			ApeCmd cmd = { 0 };                               \
-			ape_da_append_many(&cmd, argv, argc);             \
-			if (!ape_cmd_run_sync(cmd))                       \
-				exit(1);                                  \
-			exit(0);                                          \
-		}                                                         \
+#define APE_REBUILD(argc, argv)                                            \
+	do {                                                               \
+		const char *srcpath = __FILE__;                            \
+		assert(argc >= 1);                                         \
+		const char *binpath = argv[0];                             \
+		int rebuild_needed = ape_needs_rebuild1(binpath, srcpath); \
+		if (rebuild_needed < 0)                                    \
+			exit(1);                                           \
+		if (rebuild_needed) {                                      \
+			ApeStrBuilder sb = { 0 };                          \
+			ape_sb_append_str(&sb, binpath);                   \
+			ape_sb_append_str(&sb, ".old");                    \
+			ape_da_append(&sb, '\0');                          \
+			if (!ape_rename(binpath, sb.items))                \
+				exit(1);                                   \
+			ApeCmd rebuild = { 0 };                            \
+			ape_cmd_append(&rebuild,                           \
+				       _APE_REBUILD(binpath, srcpath));    \
+			bool rebuilt = ape_cmd_run_sync(rebuild);          \
+			if (!rebuilt) {                                    \
+				ape_rename(sb.items, binpath);             \
+				exit(1);                                   \
+			}                                                  \
+			ApeCmd cmd = { 0 };                                \
+			ape_da_append_many(&cmd, argv, argc);              \
+			if (!ape_cmd_run_sync(cmd))                        \
+				exit(1);                                   \
+			exit(0);                                           \
+		}                                                          \
 	} while (0)
 
 #define APEBUILD_MAIN(a_argc, a_argv)             \
@@ -999,6 +1109,71 @@ int ape_rename(const char *oldname, const char *newname)
 		return apebuild_main(argc, argv); \
 	}                                         \
 	int apebuild_main(a_argc, a_argv)
+
+#ifdef _WIN32
+
+struct DIR {
+	HANDLE hFind;
+	WIN32_FIND_DATA data;
+	struct dirent *dirent;
+};
+
+struct dirent {
+	char d_name[MAX_PATH + 1];
+};
+
+DIR *opendir(const char *dirpath)
+{
+	assert(dirpath);
+	char buffer[MAX_PATH];
+	snprintf(buffer, MAX_PATH, "%s\\*", dirpath);
+	DIR *dir = (DIR *)calloc(1, sizeof(DIR));
+	dir->hFind = FindFirstFile(buffer, &dir->data);
+	if (dir->hFind == INVALID_HANDLE_VALUE) {
+		errno = ENOSYS;
+		goto fail;
+	}
+	return dir;
+	if (dir) {
+		free(dir);
+	}
+	return NULL;
+}
+
+struct dirent *readdir(DIR *dirp)
+{
+	assert(dirp);
+	if (dirp->dirent == NULL) {
+		dirp->dirent = (struct dirent *)calloc(1, sizeof(dirent));
+	} else {
+		if (!FindNextFile(dirp->hFind, &dirp->data)) {
+			if (GetLastError() != ERROR_NO_MORE_FILES) {
+				errno = ENOSYS;
+			}
+			return NULL;
+		}
+	}
+	memset(dirp->dirent->d_name, 0, sizeof(dirp->dirent->d_name));
+	strncpy(dirp->dirent->d_name, dirp->data.cFileName,
+		sizeof(dirp->dirent->d_name) - 1);
+	return dirp->dirent;
+}
+
+int closedir(DIR *dirp)
+{
+	assert(dirp);
+	if (!FindClose(dirp->hFind)) {
+		errno = ENOSYS;
+		return -1;
+	}
+	if (dirp->dirent) {
+		free(dirp->dirent);
+	}
+	free(dirp);
+	return 0;
+}
+
+#endif
 
 #endif
 #endif
