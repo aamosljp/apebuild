@@ -83,10 +83,14 @@
 
 	Your bootstrapper will just be rebuilt first and then this function will be called.
 
-	APEBUILD_MAIN should return one of:
-		APEBUILD_SUCCESS
-		APEBUILD_ERROR
-	You can also call APEERROR(fmt, ...) to send a custom error message.
+	APEBUILD_MAIN should return 0 on success and non-zero on error.
+
+	You can also use the following macros to send custom messages:
+	APEINFO(fmt, ...)
+	APEDEBUG(fmt, ...)
+	APEWARN(fmt, ...)
+	APEERROR(fmt, ...)
+	Their format is exactty the same as printf.
 
 	Inside APEBUILD_MAIN you should use the following functions and macros:
 		APE_BUILD_EXEC(name)
@@ -471,7 +475,7 @@ ApeProc ape_run_cmd_async(ApeCmd cmd)
 	ApeStrBuilder sb = { 0 };
 	ape_cmd_render(cmd, &sb);
 	ape_da_append(&sb, '\0');
-	APEINFO("CMD: %s", sb.items);
+	eprintf("CMD: %s\n", sb.items);
 	ape_da_free(sb);
 	memset(&sb, 0, sizeof(sb));
 
@@ -588,6 +592,44 @@ bool ape_cmd_run_sync(ApeCmd cmd)
 #define APE_FILE_C 1
 #define APE_FILE_CXX 2
 
+static char ape_temp_str[64];
+static int ape_temp_str_s = 0;
+static char ape_temp_str2[64];
+static int ape_temp_str2_s = 0;
+
+/* FIX: Here we are assuming that the string fits inside ape_temp_str */
+#define ape_temp_str_append(fmt, ...)                            \
+	do {                                                     \
+		char *__temp = malloc(64);                       \
+		sprintf(__temp, fmt __VA_OPT__(, ) __VA_ARGS__); \
+		strncpy(ape_temp_str + ape_temp_str_s, __temp,   \
+			strlen(__temp));                         \
+		ape_temp_str_s += strlen(__temp);                \
+		ape_temp_str[ape_temp_str_s] = '\0';             \
+	} while (0)
+
+#define ape_temp_str2_append(fmt, ...)                           \
+	do {                                                     \
+		char *__temp = malloc(64);                       \
+		sprintf(__temp, fmt __VA_OPT__(, ) __VA_ARGS__); \
+		strncpy(ape_temp_str2 + ape_temp_str2_s, __temp, \
+			strlen(__temp));                         \
+		ape_temp_str2_s += strlen(__temp);               \
+		ape_temp_str2[ape_temp_str2_s] = '\0';           \
+	} while (0)
+
+#define ape_temp_str_flush()            \
+	do {                            \
+		ape_temp_str_s = 0;     \
+		ape_temp_str[0] = '\0'; \
+	} while (0)
+
+#define ape_temp_str2_flush()            \
+	do {                             \
+		ape_temp_str2_s = 0;     \
+		ape_temp_str2[0] = '\0'; \
+	} while (0)
+
 typedef struct {
 	int type;
 	char *filename;
@@ -682,6 +724,14 @@ int ape_build_sources_append_dir(char *name, char *path)
 	}
 	while ((entry = readdir(dir)) != NULL) {
 		ApeStrBuilder f = { 0 };
+#ifdef APELANGC
+		if (!ape_endswith(entry->d_name, ".c"))
+			continue;
+#endif
+#ifdef APELANGCXX
+		if (!ape_endswith(entry->d_name, ".cpp")))
+			continue;
+#endif
 		if (entry->d_name[0] == '.')
 			continue;
 		ape_sb_append_str(&f, path);
@@ -847,7 +897,7 @@ int ape_needs_rebuild(const char *outfile, ApeStrList *infiles)
 int ape_needs_rebuild1(const char *outfile, const char *infile)
 {
 	ApeStrList s = { 0 };
-	ape_da_append(&s, (char*)infile);
+	ape_da_append(&s, (char *)infile);
 	return ape_needs_rebuild(outfile, &s);
 }
 
@@ -892,8 +942,10 @@ char *ape_build_file(ApeFile *file, ApeStrList *includes, ApeBuildTarget target)
 		}
 	}
 #endif
-	if (file->type == 0)
+	if (file->type == 0) {
+		ape_temp_str2_flush();
 		return NULL;
+	}
 	if (includes->count > 0) {
 		for (size_t i = 0; i < includes->count; i++) {
 			ApeStrBuilder I = { 0 };
@@ -906,6 +958,9 @@ char *ape_build_file(ApeFile *file, ApeStrList *includes, ApeBuildTarget target)
 	ape_cmd_append(&cmd, file->filename);
 	ape_cmd_append(&cmd, "-o");
 	ape_cmd_append(&cmd, outfname.items);
+	eprintf("%s", ape_temp_str);
+	eprintf("%s", ape_temp_str2);
+	ape_temp_str2_flush();
 	ape_cmd_run_sync(cmd);
 	return outfname.items;
 }
@@ -915,7 +970,11 @@ ApeStrList ape_build_sources(ApeFileList *files, ApeStrList *includes,
 {
 	ApeStrList out = { 0 };
 	for (size_t i = 0; i < files->count; i++) {
+		int p = 100 / files->count * i;
+		ape_temp_str2_append("[" FG_GREEN "%d%%" RESET "] ", p);
 		char *ob = ape_build_file(&(files->items[i]), includes, target);
+		if (ape_temp_str2 != NULL)
+			ape_temp_str2_flush();
 		if (ob != NULL)
 			ape_da_append(&out, ob);
 	}
@@ -938,6 +997,10 @@ void ape_link_files(ApeStrList *files, ApeStrList *libs, char *outfname,
 		}
 	}
 	ape_da_append_many(&cmd, files->items, files->count);
+	ape_temp_str2_append("[" FG_GREEN "100%%" RESET "] ");
+	eprintf("%s", ape_temp_str);
+	eprintf("%s", ape_temp_str2);
+	ape_temp_str2_flush();
 	ape_cmd_run_sync(cmd);
 }
 
@@ -960,6 +1023,8 @@ void ape_build_target(char *name, ApeBuildTarget target)
 void ape_build_all_target(ApeBuildTarget target)
 {
 	for (size_t i = 0; i < ApeBuilds.count; i++) {
+		ape_temp_str_flush();
+		ape_temp_str_append("[%ld/%ld] ", i + 1, ApeBuilds.count);
 		ApeStrList obj = ape_build_sources(
 			&(ApeBuilds.items[i].infiles),
 			&(ApeBuilds.items[i].includes), target);
@@ -1101,11 +1166,19 @@ int ape_rename(const char *oldname, const char *newname)
 		}                                                          \
 	} while (0)
 
+#define APEBUILD_SUCCESS 0
+#define APEBUILD_ERROR 1
+#define _APEBUILD_CUSTOM 2
+#define APEBUILD_CUSTOM(fmt, ...)                 \
+	APEERROR(fmt __VA_OPT__(, ) __VA_ARGS__); \
+	return _APEBUILD_CUSTOM
+
 #define APEBUILD_MAIN(a_argc, a_argv)             \
 	int apebuild_main(a_argc, a_argv);        \
 	int main(int argc, char **argv)           \
 	{                                         \
 		APE_REBUILD(argc, argv);          \
+		ape_temp_str_flush();             \
 		return apebuild_main(argc, argv); \
 	}                                         \
 	int apebuild_main(a_argc, a_argv)
