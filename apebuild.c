@@ -18,21 +18,21 @@
 APEBUILD_MAIN(int argc, char **argv)
 {
 	/* Tell apebuild to build the executable "example" */
-	APEDEBUG("Adding \"example\" to builds");
+	APEINFO("Adding \"example\" to builds");
 	APE_BUILD_EXEC("example");
 	/* Add every file in the "src" directory to "example" recursively */
-	APEDEBUG("Appending directory \"src\" to \"example\" sources");
+	APEINFO("Appending directory \"src\" to \"example\" sources");
 	ape_build_sources_append_dir("example", "src");
 	/* Add "include" as an include directory */
-	APEDEBUG("Appending directory \"include\" to \"example\" as an include "
+	APEINFO("Appending directory \"include\" to \"example\" as an include "
 		 "directory");
 	APE_BUILD_INCLUDES_APPEND("example", "include");
 	/* Finally, build everything with APE_TARGET_RELEASE */
-	APEDEBUG("Building all with target APE_TARGET_RELEASE");
+	APEINFO("Building all with target APE_TARGET_RELEASE");
 	ape_build_all_target(APE_TARGET_RELEASE);
 	/* And optionally run "example" immediately after building */
 	if (argc > 1 && strcmp(argv[1], "run") == 0) {
-		APEDEBUG("Running \"example\"...");
+		APEINFO("Running \"example\"...");
 		ape_run("example", argv + 2);
 	}
 	return 0;
