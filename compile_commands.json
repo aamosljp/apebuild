@@ -1,0 +1,29 @@
+[
+  {
+    "arguments": [
+      "/usr/bin/gcc",
+      "-c",
+      "-o",
+      "./apebuild",
+      "apebuild.c"
+    ],
+    "directory": "/home/aamos/src/apebuild",
+    "file": "/home/aamos/src/apebuild/apebuild.c",
+    "output": "/home/aamos/src/apebuild/apebuild"
+  },
+  {
+    "arguments": [
+      "/usr/bin/gcc",
+      "-c",
+      "-Wall",
+      "-Werror",
+      "-Iinclude",
+      "-o",
+      "src/example.c.o",
+      "src/example.c"
+    ],
+    "directory": "/home/aamos/src/apebuild",
+    "file": "/home/aamos/src/apebuild/src/example.c",
+    "output": "/home/aamos/src/apebuild/src/example.c.o"
+  }
+]

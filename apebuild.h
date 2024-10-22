@@ -724,14 +724,6 @@ int ape_build_sources_append_dir(char *name, char *path)
 	}
 	while ((entry = readdir(dir)) != NULL) {
 		ApeStrBuilder f = { 0 };
-#ifdef APELANGC
-		if (!ape_endswith(entry->d_name, ".c"))
-			continue;
-#endif
-#ifdef APELANGCXX
-		if (!ape_endswith(entry->d_name, ".cpp")))
-			continue;
-#endif
 		if (entry->d_name[0] == '.')
 			continue;
 		ape_sb_append_str(&f, path);
@@ -745,15 +737,19 @@ int ape_build_sources_append_dir(char *name, char *path)
 				 strerror(errno));
 			return -1;
 		}
-		switch (statbuf.st_mode & S_IFMT) {
-		case S_IFDIR:
+		if ((statbuf.st_mode & S_IFMT) == S_IFDIR) {
 			ape_build_sources_append_dir(name, f.items);
-			break;
-		case S_IFREG:
+		}
+#ifdef APELANGC
+		if (!ape_endswith(entry->d_name, ".c"))
+			continue;
+#endif
+#ifdef APELANGCXX
+		if (!ape_endswith(entry->d_name, ".cpp")))
+			continue;
+#endif
+		if ((statbuf.st_mode & S_IFMT) == S_IFREG) {
 			APE_BUILD_SOURCES_APPEND(name, f.items);
-			break;
-		default:
-			break;
 		}
 	}
 }
@@ -794,16 +790,17 @@ int ape_build_tests_append_dir(char *name, char *path)
 	}
 }
 
-#define APE_BUILD_LIBS_APPEND(name, ...)                                       \
-	do {                                                                   \
-		ApeBuild *ab = ape_find_build(name);                           \
-		if (ab == NULL) {                                              \
-			APEERROR("Build target not found: %s", name);          \
-			break;                                                 \
-		}                                                              \
-		ape_da_append_many(ab->libs,                                   \
-				   ((const char *[]){ __VA_ARGS__ }),          \
-				   (sizeof((const char *[]){ __VA_ARGS__ }))); \
+#define APE_BUILD_LIBS_APPEND(name, ...)                                      \
+	do {                                                                  \
+		ApeBuild *ab = ape_find_build(name);                          \
+		if (ab == NULL) {                                             \
+			APEERROR("Build target not found: %s", name);         \
+			break;                                                \
+		}                                                             \
+		ape_da_append_many(&(ab->libs),                               \
+				   ((const char *[]){ __VA_ARGS__ }),         \
+				   (sizeof((const char *[]){ __VA_ARGS__ }) / \
+				    sizeof(const char *)));                   \
 	} while (0)
 
 #define APE_BUILD_INCLUDES_APPEND(name, incl)                         \
@@ -987,6 +984,7 @@ void ape_link_files(ApeStrList *files, ApeStrList *libs, char *outfname,
 	ApeCmd cmd = { 0 };
 	ape_cmd_append(&cmd, APELD);
 	ape_cmd_append(&cmd, "-o", outfname);
+	ape_da_append_many(&cmd, files->items, files->count);
 	if (libs->count > 0) {
 		for (size_t i = 0; i < libs->count; i++) {
 			ApeStrBuilder l = { 0 };
@@ -996,7 +994,6 @@ void ape_link_files(ApeStrList *files, ApeStrList *libs, char *outfname,
 			ape_cmd_append(&cmd, l.items);
 		}
 	}
-	ape_da_append_many(&cmd, files->items, files->count);
 	ape_temp_str2_append("[" FG_GREEN "100%%" RESET "] ");
 	eprintf("%s", ape_temp_str);
 	eprintf("%s", ape_temp_str2);
@@ -1179,6 +1176,7 @@ int ape_rename(const char *oldname, const char *newname)
 	{                                         \
 		APE_REBUILD(argc, argv);          \
 		ape_temp_str_flush();             \
+		ape_temp_str2_flush();            \
 		return apebuild_main(argc, argv); \
 	}                                         \
 	int apebuild_main(a_argc, a_argv)
