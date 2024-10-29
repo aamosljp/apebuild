@@ -598,24 +598,23 @@ static char ape_temp_str2[64];
 static int ape_temp_str2_s = 0;
 
 /* FIX: Here we are assuming that the string fits inside ape_temp_str */
-#define ape_temp_str_append(fmt, ...)                            \
-	do {                                                     \
-		char *__temp = malloc(64);                       \
-		sprintf(__temp, fmt __VA_OPT__(, ) __VA_ARGS__); \
-		strncpy(ape_temp_str + ape_temp_str_s, __temp,   \
-			strlen(__temp));                         \
-		ape_temp_str_s += strlen(__temp);                \
-		ape_temp_str[ape_temp_str_s] = '\0';             \
+#define ape_temp_str_append(fmt, ...)                                         \
+	do {                                                                  \
+		char *_temp = malloc(64);                                     \
+		sprintf(_temp, fmt __VA_OPT__(, ) __VA_ARGS__);               \
+		strncpy(ape_temp_str + ape_temp_str_s, _temp, strlen(_temp)); \
+		ape_temp_str_s += strlen(_temp);                              \
+		ape_temp_str[ape_temp_str_s] = '\0';                          \
 	} while (0)
 
-#define ape_temp_str2_append(fmt, ...)                           \
-	do {                                                     \
-		char *__temp = malloc(64);                       \
-		sprintf(__temp, fmt __VA_OPT__(, ) __VA_ARGS__); \
-		strncpy(ape_temp_str2 + ape_temp_str2_s, __temp, \
-			strlen(__temp));                         \
-		ape_temp_str2_s += strlen(__temp);               \
-		ape_temp_str2[ape_temp_str2_s] = '\0';           \
+#define ape_temp_str2_append(fmt, ...)                          \
+	do {                                                    \
+		char *_temp = malloc(64);                       \
+		sprintf(_temp, fmt __VA_OPT__(, ) __VA_ARGS__); \
+		strncpy(ape_temp_str2 + ape_temp_str2_s, _temp, \
+			strlen(_temp));                         \
+		ape_temp_str2_s += strlen(_temp);               \
+		ape_temp_str2[ape_temp_str2_s] = '\0';          \
 	} while (0)
 
 #define ape_temp_str_flush()            \
@@ -653,6 +652,7 @@ typedef struct {
 } ApeStrList;
 
 typedef struct {
+	char *name;
 	char *outname;
 	ApeFileList infiles;
 	ApeFileList testfiles;
@@ -670,7 +670,7 @@ static struct {
 ApeBuild *ape_find_build(char *name)
 {
 	for (size_t i = 0; i < ApeBuilds.count; i++) {
-		if (strcmp(ApeBuilds.items[i].outname, name) == 0)
+		if (strcmp(ApeBuilds.items[i].name, name) == 0)
 			return &ApeBuilds.items[i];
 	}
 	return NULL;
@@ -714,6 +714,16 @@ ApeBuild *ape_find_build(char *name)
 		}                                                     \
 	} while (0)
 
+#define APE_BUILD_SET_OUTFILE(name, outpath)                          \
+	do {                                                          \
+		ApeBuild *ab = ape_find_build(name);                  \
+		if (ab == NULL) {                                     \
+			APEERROR("Build target not found: %s", name); \
+			break;                                        \
+		}                                                     \
+		ab->outname = outpath;                                \
+	} while (0)
+
 int ape_build_sources_append_dir(char *name, char *path)
 {
 	DIR *dir = opendir(path);
@@ -752,6 +762,7 @@ int ape_build_sources_append_dir(char *name, char *path)
 			APE_BUILD_SOURCES_APPEND(name, f.items);
 		}
 	}
+	return 0;
 }
 
 int ape_build_tests_append_dir(char *name, char *path)
@@ -788,6 +799,7 @@ int ape_build_tests_append_dir(char *name, char *path)
 			break;
 		}
 	}
+	return 1;
 }
 
 #define APE_BUILD_LIBS_APPEND(name, ...)                                      \
@@ -813,19 +825,21 @@ int ape_build_tests_append_dir(char *name, char *path)
 		ape_da_append(&(ab->includes), incl);                 \
 	} while (0)
 
-#define APE_BUILD_EXEC(name)                                           \
-	ape_da_append(&ApeBuilds, ((ApeBuild){ .outname = name,        \
+#define APE_BUILD_EXEC(bname)                                          \
+	ape_da_append(&ApeBuilds, ((ApeBuild){ .name = bname,          \
+					       .outname = bname,       \
 					       .infiles = { 0 },       \
 					       .type = APE_BUILD_EXEC, \
 					       .libs = { 0 },          \
 					       .includes = { 0 } }))
 
-#define APE_BUILD_LIB(name)                                          \
-	ape_da_append(&ApeBuilds, (ApeBuild){ .outname = name,       \
-					      .infiles = { 0 },      \
-					      .type = APE_BUILD_LIB, \
-					      .libs = { 0 },         \
-					      .includes = { 0 } })
+#define APE_BUILD_LIB(bname)                                          \
+	ape_da_append(&ApeBuilds, ((ApeBuild){ .name = bname,         \
+					       .outname = bname,      \
+					       .infiles = { 0 },      \
+					       .type = APE_BUILD_LIB, \
+					       .libs = { 0 },         \
+					       .includes = { 0 } }))
 
 int ape_needs_rebuild(const char *outfile, ApeStrList *infiles)
 {
@@ -898,13 +912,16 @@ int ape_needs_rebuild1(const char *outfile, const char *infile)
 	return ape_needs_rebuild(outfile, &s);
 }
 
+static int ape_rebuild_all = 0;
+
 char *ape_build_file(ApeFile *file, ApeStrList *includes, ApeBuildTarget target)
 {
 	ApeStrBuilder outfname = { 0 };
 	ape_sb_append_str(&outfname, strdup(file->filename));
 	ape_sb_append_str(&outfname, ".o");
 	ape_da_append(&outfname, '\0');
-	if (!ape_needs_rebuild1(outfname.items, file->filename))
+	if (!ape_needs_rebuild1(outfname.items, file->filename) &&
+	    !ape_rebuild_all)
 		return outfname.items;
 	ApeCmd cmd = { 0 };
 #ifdef APELANGC
@@ -970,8 +987,7 @@ ApeStrList ape_build_sources(ApeFileList *files, ApeStrList *includes,
 		int p = 100 / files->count * i;
 		ape_temp_str2_append("[" FG_GREEN "%d%%" RESET "] ", p);
 		char *ob = ape_build_file(&(files->items[i]), includes, target);
-		if (ape_temp_str2 != NULL)
-			ape_temp_str2_flush();
+		ape_temp_str2_flush();
 		if (ob != NULL)
 			ape_da_append(&out, ob);
 	}
@@ -979,10 +995,13 @@ ApeStrList ape_build_sources(ApeFileList *files, ApeStrList *includes,
 }
 
 void ape_link_files(ApeStrList *files, ApeStrList *libs, char *outfname,
-		    ApeBuildTarget target)
+		    ApeBuildTarget target, ApeBuildType type)
 {
 	ApeCmd cmd = { 0 };
 	ape_cmd_append(&cmd, APELD);
+	if (type == APE_BUILD_LIB) {
+		ape_cmd_append(&cmd, "--shared");
+	}
 	ape_cmd_append(&cmd, "-o", outfname);
 	ape_da_append_many(&cmd, files->items, files->count);
 	if (libs->count > 0) {
@@ -994,6 +1013,9 @@ void ape_link_files(ApeStrList *files, ApeStrList *libs, char *outfname,
 			ape_cmd_append(&cmd, l.items);
 		}
 	}
+#ifdef APELDFLAGS
+	ape_cmd_append(&cmd, APELDFLAGS);
+#endif
 	ape_temp_str2_append("[" FG_GREEN "100%%" RESET "] ");
 	eprintf("%s", ape_temp_str);
 	eprintf("%s", ape_temp_str2);
@@ -1010,8 +1032,10 @@ void ape_build_target(char *name, ApeBuildTarget target)
 	}
 	ApeStrList obj =
 		ape_build_sources(&(ab->infiles), &(ab->includes), target);
-	if (obj.count > 0 && ape_needs_rebuild(ab->outname, &obj)) {
-		ape_link_files(&obj, &(ab->libs), ab->outname, target);
+	if (obj.count > 0 &&
+	    (ape_needs_rebuild(ab->outname, &obj) || ape_rebuild_all)) {
+		ape_link_files(&obj, &(ab->libs), ab->outname, target,
+			       ab->type);
 	} else {
 		APEINFO("No files to build");
 	}
@@ -1026,9 +1050,11 @@ void ape_build_all_target(ApeBuildTarget target)
 			&(ApeBuilds.items[i].infiles),
 			&(ApeBuilds.items[i].includes), target);
 		if (obj.count > 0 &&
-		    ape_needs_rebuild(ApeBuilds.items[i].outname, &obj)) {
+		    (ape_needs_rebuild(ApeBuilds.items[i].outname, &obj) ||
+		     ape_rebuild_all)) {
 			ape_link_files(&obj, &(ApeBuilds.items[i].libs),
-				       ApeBuilds.items[i].outname, target);
+				       ApeBuilds.items[i].outname, target,
+				       ApeBuilds.items[i].type);
 		} else {
 			APEINFO("No files to build");
 		}
@@ -1047,8 +1073,10 @@ void ape_build_tests(char *name)
 	ApeStrList tobj = ape_build_sources(&(ab->testfiles), &(ab->includes),
 					    APE_TARGET_TEST);
 	ape_da_append_many(&obj, tobj.items, tobj.count);
-	if (obj.count > 0 && ape_needs_rebuild(ab->outname, &obj)) {
-		ape_link_files(&obj, &(ab->libs), ab->outname, APE_TARGET_TEST);
+	if (obj.count > 0 &&
+	    (ape_needs_rebuild(ab->outname, &obj) || ape_rebuild_all)) {
+		ape_link_files(&obj, &(ab->libs), ab->outname, APE_TARGET_TEST,
+			       ab->type);
 	} else {
 		APEINFO("No files to build");
 	}
@@ -1130,7 +1158,7 @@ int ape_rename(const char *oldname, const char *newname)
 	return 0;
 }
 
-#define _APE_REBUILD(binpath, srcpath) "gcc", "-o", binpath, srcpath
+#define _APE_REBUILD(binpath, srcpath) APECC, "-o", binpath, srcpath
 
 #define APE_REBUILD(argc, argv)                                            \
 	do {                                                               \
