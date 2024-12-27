@@ -1,385 +1,94 @@
-/*
-	apebuild.h -- Build system entirely in one header (currently linux only)
+#include <stdint.h>
+#ifndef APEBUILD_IMPLEMENTATION
+#pragma GCC error("Define APEBUILD_IMPLEMENTATION before including apebuild.h")
+#else
 
-	Project URL: https://github.com/aamosljp/apebuild
+#ifndef APEBUILD_REBUILD_COMMAND
+#define APEBUILD_REBUILD_COMMAND(out, in) "gcc", "-o", out, in
+#endif
 
-	If you would like to contribute, see README.md
+#ifndef APE_OBJ_EXTENSION
+#define APE_OBJ_EXTENSION ".o"
+#endif
 
-	Do this:
-		#define APEBUILD_IMPL
-	before you include this file in *one* C or C++ file to create the
-	implementation.
-
-	In the same place, also define your linker command:
-		#define APELD "gcc"
-
-	Also define one or both of:
-		#define APELANGC		-- Compile C files
-		#define APELANGCXX		-- Compile C++ files
-
-	If APELANGC is defined, you can optonally define:
-		#define APECFLAGS		-- Custom C compiler flags, quoted strings separated by commas
-		#define APECFLAGS_DEBUG		-- Same as above, but only applies with APE_TARGET_DEBUG
-
-	If APELANGCXX is defined, you can optonally define:
-		#define APECXXFLAGS		-- Custom C++ compiler flags, quoted strings separated by commas
-		#define APECXXFLAGS_DEBUG	-- Same as above, but only applies with APE_TARGET_DEBUG
-
-
-	Custom data structures:
-
-		NOTE: not all custom types are listed here, if you want, you can always just
-		read through the code yourself
-
-		Dynamic arrays:
-			There are several types of dynamic arrays defined within this header,
-			you can also define your own dynamic arrays by using the following
-			structure:
-
-			typedef struct {
-				size_t capacity;
-				size_t count;
-				type items;	-- Type is whatever type is stored in this dynamic array
-			} typename;	-- typename can be whatever you want
-
-			There are 3 macros for manipulating dynamic arrays:
-				ape_da_append(da, x)		-- Append x to da
-				ape_da_append_many(da, xs, n)	-- Append n elements from xs to da
-				ape_da_free(da)			-- Free da
-
-			You can also change the count variable to anything you want,
-			generally you should only ever set it to 0, so then the macros
-			will actually assume it's empty and overwrite the data.
-			Essentially just reusing the same memory for different things.
-
-		ApeStrBuilder:
-			ApeStrBuilder is a dynamic array of chars, it is very useful
-			for building strings from smaller parts, there is a special utility
-			function for this:
-				ape_sb_append_str(sb, str)
-				sb should be a pointer to an ApeStrBuilder
-				str should be a null-terminated string
-			If you want to append single characters you should use
-			ape_da_append instead.
-			The last character should always be NULL if you want to use
-			the resulting string as an actual string
-			The resulting string is is sb.items, where sb is an ApeStrBuilder
-
-		ApeBuildTarget
-			Exists just for convenience, it is an enum containing three
-			different values:
-				APE_TARGET_RELEASE,
-				APE_TARGET_DEBUG,
-				APE_TARGET_TEST,
-
-	BOOTSTRAPPING YOUR BUILD SYSTEM
-	===============================
-	Instead of using the normal main function, you should use the custom
-	APEBUILD_MAIN(int argc, char **argv) macro:
-
-		APEBUILD_MAIN(int argc, char **argv) {
-			// Your bootstrapper code goes here ...
-		}
-
-	Your bootstrapper will just be rebuilt first and then this function will be called.
-
-	APEBUILD_MAIN should return 0 on success and non-zero on error.
-
-	You can also use the following macros to send custom messages:
-	APEINFO(fmt, ...)
-	APEDEBUG(fmt, ...)
-	APEWARN(fmt, ...)
-	APEERROR(fmt, ...)
-	Their format is exactty the same as printf.
-
-	Inside APEBUILD_MAIN you should use the following functions and macros:
-		APE_BUILD_EXEC(name)
-			Define an executable to be built
-
-		APE_BUILD_LIB(name)
-			Define a library to be built
-
-		APE_BUILD_SOURCES_APPEND(name, ...)
-			Add sources to library or executable, ... should be
-			a comma separated list of file names
-
-		APE_BUILD_LIBS_APPEND(name, ...)
-			Add libraries to link with built library or executable,
-			... should be a comma separated list of library names
-
-		APE_BUILD_INCLUDES_APPEND(name, ...)
-			Add include directories to library or executable,
-			... should be a comma separated list of directory names
-
-		ape_build_sources_append_dir(name, dirpath)
-			Add all source files from directory at dirpath to library
-			or executable.
-
-		ape_build_target(name, target)
-			Build the library or executable name,
-			target should be one of:
-				APE_TARGET_RELEASE
-				APE_TARGET_DEBUG
-				APE_TARGET_TEST
-
-		ape_build_all_target(target)
-			Build all libraries and executables,
-			target should be one of:
-				APE_TARGET_RELEASE
-				APE_TARGET_DEBUG
-				APE_TARGET_TEST
-
-		ape_run(name, args)
-			Run executable name with the arguments in args,
-			args is a NULL terminated list of strings.
-			Return value is 0 on success.
-
-		ape_run_all()
-			Run all executables, currently doesn't support any arguments
-
-	You can also define tests:
-		tests are just source files that are only included in APE_TARGET_TEST.
-		When you build anything with APE_TARGET_TEST, the TEST macro is always
-		defined by default.
-
-		APE_BUILD_TESTS_APPEND(name, ...)
-			Add tests to executable or library,
-			... should be a comma separated list of file paths
-
-		ape_build_tests_append_dir(name, dirpath)
-			Add tests from directory to executable or library,
-			dirpath should be a path to a directory
-
-		ape_build_tests(name)
-			Build name with target APE_TARGET_TEST
-
-		ape_run_tests(name)
-			Build name with target APE_TARGET_TEST and run it
-
-		ape_run_tests_all()
-			Build all executables and libraries containing test files
-			with target APE_TARGET_TEST and run them
-
-
-	If you want more control over what to build, you can use the following functions:
-
-		char *ape_build_file(file, includes, target)
-			file is a pointer to an ApeFile struct, it contains two values:
-				filename: A string containing the file's full path
-				type: The file type (extension), one of APE_FILE_C or APE_FILE_CXX
-
-			includes is a pointer to an ApeStrList sruct, it's a dynamic
-			array of strings containing the include paths.
-
-			target is one of:
-				APE_TARGET_RELEASE
-				APE_TARGET_TEST
-				APE_TARGET_DEBUG
-
-			The return value is the full path of the resulting object file
-
-		ApeStrList *ape_build_sources(files, includes, target)
-			files is a pointer to an ApeFileList dynamic array containing
-			ApeFile structs defining what files are to be built
-
-			the return value is an ApeStrList dynamic array containing
-			file paths to all of the resulting object files
-
-			the rest are the same as ape_build_file
-
-		ape_link_files(files, libs, outfname, target)
-			files is a pointer to an ApeFileList dynamic array containing
-			the object files to be linked
-
-			libs is a pointer to an ApeStrList dynamic array containing
-			the names of the libraries used
-
-			outfname is a string containing the output executable or library name
-
-			target is one of:
-				APE_TARGET_RELEASE
-				APE_TARGET_DEBUG
-				APE_TARGET_TEST
-
-	If that's still not enough control, you can use ApeCmd directly:
-		ApeCmd is a dynamic array of strings, these strings are then converted
-		to a command and it's arguments by ape_cmd_run_sync and ape_cmd_run_async
-
-		ape_cmd_append(cmd, ...)
-			cmd should be a pointer to an ApeCmd struct.
-			... should be a comma separated list of arguments to append to cmd
-
-		ape_cmd_run_sync(cmd)
-			cmd should be an ApeCmd struct, not a pointer.
-			This will run the command synchronously and return 0 on success
-
-		ape_cmd_run_async(cmd)
-			Same as ape_cmd_run_sync but run cmd asynchronously instead
-
-		ape_cmd_free(cmd)
-			Free cmd
-			cmd should not be a pointer
-
-	There are also functions for detecting when something needs to be rebuilt:
-		These are automatically called by ape_build_*
-
-		ape_needs_rebuild1(outfile, infile)
-			outfile is a path to the file that should(maybe) be built
-			infile is a path to the file to build from
-			returns 1 if outfile needs to be rebuilt, otherwise, returns 0
-
-		ape_needs_rebuild(outfile, infiles)
-			outfile is a path to the file that should(maybe) be built
-			infiles is an ApeStrList dynamic array containing all the files
-			outfile should be built from
-			returns 1 if outfile needs to be rebuilt, otherwise, returns 0
-
- */
-#ifndef APEBUILD_IMPL
-#pragma GCC error("Define APEBUILD_IMPL before including this")
-#else /* ifdef APEBUILD_IMPL */
-
+#ifdef APE_PRESET_LINUX_GCC_C
+#ifndef APECC
+#define APECC "gcc"
+#endif
 #ifndef APELD
-#pragma GCC error("Define APELD (linker)")
-#else /* ifdef APELD */
+#define APELD "gcc"
+#endif
+#ifndef APE_OBJ_EXTENSION
+#define APE_OBJ_EXTENSION ".o"
+#endif
+#ifndef APE_SRC_EXTENSION
+#define APE_SRC_EXTENSION ".c"
+#endif
+#ifndef APE_BUILD_SRC_ARGS
+#define APE_BUILD_SRC_ARGS(infile, outfile) \
+	"-Iinclude", "-c", infile, "-o", outfile
+#endif
+#ifndef APE_LINK_ARGS
+#define APE_LINK_ARGS(outfile) "-o", outfile
+#endif
+#endif
 
-#ifdef APELANGC
-
-#ifndef APELANGANY
-#define APELANGANY
-#endif /* APELANGANY */
+#ifdef APE_PRESET_LINUX_GCC_CXX
+#ifndef APECC
+#define APECC "g++"
+#endif
+#ifndef APELD
+#define APELD "g++"
+#endif
+#ifndef APE_OBJ_EXTENSION
+#define APE_OBJ_EXTENSION ".o"
+#endif
+#ifndef APE_SRC_EXTENSION
+#define APE_SRC_EXTENSION ".cpp"
+#endif
+#ifndef APE_BUILD_SRC_ARGS
+#define APE_BUILD_SRC_ARGS(infile, outfile) \
+	"-Iinclude", "-c", infile, "-o", outfile
+#endif
+#ifndef APE_LINK_ARGS
+#define APE_LINK_ARGS(outfile) "-o", outfile
+#endif
+#endif
 
 #ifndef APECC
-#pragma GCC error("Define APECC (c compiler)")
-#else /* ifdef APECC */
-
-#define APECFLAGS_INTERNAL_DEBUG "-DDEBUG"
-#define APECFLAGS_INTERNAL "-c"
-#define _APE_APEBUILD_VALID__
-
-#ifdef APECFLAGS
-#define _APECFLAGS APECFLAGS_INTERNAL, APECFLAGS
-#else /* ifndef APECFLAGS */
-#define _APECFLAGS APECFLAGS_INTERNAL
-#endif /* APECFLAGS */
-
-#ifdef APECFLAGS_DEBUG
-#define _APECFLAGS_DEBUG APECFLAGS_INTERNAL_DEBUG, APECFLAGS_DEBUG
-#else /* ifndef APECFLAGS_DEBUG */
-#define _APECFLAGS_DEBUG APECFLAGS_INTERNAL_DEBUG
-#endif /* APECFLAGS_DEBUG */
-
-#endif /* APECC */
-
-#endif /* APELANGC */
-
-#ifdef APELANGCXX
-
-#ifndef APELANGANY
-#define APELANGANY
-#endif /* APELANGANY */
-
-#ifndef APECXX
-#pragma GCC error("Define APECXX (c++ compiler)")
-#else /* ifdef APECXX */
-
-#define APECXXFLAGS_INTERNAL_DEBUG "-DDEBUG"
-#define APECXXFLAGS_INTERNAL "-c"
-#define _APE_APEBUILD_VALID__
-
-#ifdef APECXXFLAGS
-#define _APECXXFLAGS APECXXFLAGS, APECXXFLAGS_INTERNAL
-#else /* ifndef APECXXFLAGS */
-#define _APECXXFLAGS APECXXFLAGS_INTERNAL
-#endif /* APECXXFLAGS */
-
-#ifdef APECXXFLAGS_DEBUG
-#define _APECXXFLAGS_DEBUG APECXXFLAGS_INTERNAL_DEBUG, APECXXFLAGS_DEBUG
-#else /* ifndef APECXXFLAGS_DEBUG */
-#define _APECXXFLAGS_DEBUG APECXXFLAGS_INTERNAL_DEBUG
-#endif /* APECXXFLAGS_DEBUG */
-
-#endif /* APECXX */
-
-#endif /* APELANGCXX */
-
-#ifndef APELANGANY
-#pragma GCC error("Define one of APELANGC or APELANGCXX")
-#endif /* APELANGANY */
-
-#endif /* APELD */
+#pragma GCC error("Define APECC as your compiler")
 #endif
-
-#ifdef _APE_APEBUILD_VALID__
-#ifndef _APEBUILD_H
-#define _APEBUILD_H
-
-#include <stdlib.h>
-#include <string.h>
-#include <stdio.h>
-#include <unistd.h>
-#include <sys/types.h>
-#include <errno.h>
-#include <assert.h>
-#include <wait.h>
-#include <stdbool.h>
-#include <sys/stat.h>
-#ifndef _WIN32
-#include <dirent.h>
-#else
-#define WIN32_LEAN_AND_MEAN
-#include "windows.h"
-
-struct dirent {
-	char d_name[MAX_PATH + 1];
-};
-
-static DIR *opendir(const char *dirpath);
-static struct dirent *readdir(DIR *dirp);
-static int closedir(DIR *dirp);
-
+#ifndef APELD
+#pragma GCC error("Define APELD as your linker")
 #endif
-
-#define BOLD "\x1b[1m"
-#define FG_RED "\x1b[31m"
-#define FG_GREEN "\x1b[32m"
-#define FG_YELLOW "\x1b[33m"
-#define FG_CYAN "\x1b[36m"
-#define RESET "\x1b[0m"
-
-#define eprintf(fmt, ...) fprintf(stderr, fmt __VA_OPT__(, ) __VA_ARGS__)
-
-#define APE_LOG_INFO BOLD FG_GREEN "[INFO] " RESET
-#define APE_LOG_DEBUG BOLD FG_CYAN "[DEBUG] " RESET
-#define APE_LOG_WARN BOLD FG_YELLOW "[WARN] " RESET
-#define APE_LOG_ERROR BOLD FG_RED "[ERROR] " RESET
-#define APE_LOG(level, fmt, ...) \
-	eprintf(level fmt "\n" __VA_OPT__(, ) __VA_ARGS__)
-#define APEINFO(fmt, ...) APE_LOG(APE_LOG_INFO, fmt __VA_OPT__(, ) __VA_ARGS__)
-#define APEDEBUG(fmt, ...) \
-	APE_LOG(APE_LOG_DEBUG, fmt __VA_OPT__(, ) __VA_ARGS__)
-#define APEWARN(fmt, ...) APE_LOG(APE_LOG_WARN, fmt __VA_OPT__(, ) __VA_ARGS__)
-#define APEERROR(fmt, ...) \
-	APE_LOG(APE_LOG_ERROR, fmt __VA_OPT__(, ) __VA_ARGS__)
-
-typedef enum {
-	APE_TARGET_RELEASE,
-	APE_TARGET_DEBUG,
-	APE_TARGET_TEST,
-} ApeBuildTarget;
-
-int ape_endswith(char *s, const char *suffix)
-{
-	if (!s || !suffix)
-		return 0;
-	size_t lens = strlen(s);
-	size_t lensuf = strlen(suffix);
-	if (lensuf > lens)
-		return 0;
-	return strncmp(s + lens - lensuf, suffix, lensuf) == 0;
-}
+#ifndef APE_SRC_EXTENSION
+#pragma GCC error("Define APE_SRC_EXTENSION as your source file extension")
+#endif
+#ifndef APE_OBJ_EXTENSION
+#pragma GCC error( \
+	"Define APE_OBJ_EXTENSION as your object file extension (appended to source file name)")
+#endif
+#ifndef APE_BUILD_SRC_ARGS
+#pragma GCC error("Define APE_BUILD_SRC_ARGS(infile, outfile)")
+#endif
+#ifndef APE_LINK_ARGS
+#pragma GCC error("Define APE_LINK_ARGS(outfile)")
+#endif
 
 #define APE_DA_INIT_CAP 256
+
+#include <dirent.h>
+#include <sys/stat.h>
+#include <wait.h>
+#include <errno.h>
+#include <assert.h>
+#include <unistd.h>
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+
+#define APE_FLAG_REBUILD 1
+#define APE_FLAG_RUN_AFTER_BUILD 2
 
 #define ape_da_append(da, x)                                              \
 	do {                                                              \
@@ -440,6 +149,104 @@ typedef struct {
 		ape_da_append_many(sb, s, n); \
 	} while (0)
 
+static char *ape_objfile_name(char *srcfilename)
+{
+	ApeStrBuilder sb = { 0 };
+	ape_sb_append_str(&sb, srcfilename);
+	ape_sb_append_str(&sb, APE_OBJ_EXTENSION);
+	ape_da_append(&sb, 0);
+	return sb.items;
+}
+
+int ape_needs_rebuild(const char *outfile, char **infiles, size_t len)
+{
+	struct stat outs;
+	if (stat(outfile, &outs) != 0) {
+		return 1;
+	}
+	struct stat ins;
+	for (size_t i = 0; i < len; i++) {
+		if (stat(infiles[i], &ins) != 0) {
+			fprintf(stderr,
+				"ERROR: Failed to get stat (of file %s): %s\n",
+				infiles[i], strerror(errno));
+			return 1;
+		}
+		if (ins.st_mtime > outs.st_mtime) {
+			return 1;
+		}
+	}
+	return 0;
+}
+
+int ape_needs_rebuild1(const char *outfile, const char *infile)
+{
+	return ape_needs_rebuild(outfile, (char **)&infile, 1);
+}
+
+static ApeCmd ape_gen_build_command(char *srcfilename, uint16_t flags)
+{
+	ApeCmd cmd = { 0 };
+	if (!(ape_needs_rebuild1(ape_objfile_name(srcfilename), srcfilename) ||
+	      ((flags >> APE_FLAG_REBUILD) && 1)))
+		return cmd;
+	ape_cmd_append(&cmd, APECC,
+		       APE_BUILD_SRC_ARGS(srcfilename,
+					  ape_objfile_name(srcfilename)));
+	return cmd;
+}
+
+static ApeCmd ape_gen_link_command(char *outfilename, char **srcfilenames,
+				   size_t len, uint16_t flags)
+{
+	ApeCmd cmd = { 0 };
+	char **objfilenames = malloc(len);
+	for (size_t i = 0; i < len; i++) {
+		objfilenames[i] = ape_objfile_name(srcfilenames[i]);
+	}
+	if (!(ape_needs_rebuild(outfilename, objfilenames, len) ||
+	      ((flags >> APE_FLAG_REBUILD) & 1)))
+		return cmd;
+	ape_cmd_append(&cmd, APELD, APE_LINK_ARGS(outfilename));
+	for (size_t i = 0; i < len; i++) {
+		ape_cmd_append(&cmd, ape_objfile_name(srcfilenames[i]));
+	}
+	return cmd;
+}
+
+typedef struct {
+	size_t capacity;
+	size_t count;
+	ApeCmd *items;
+} ApeCmdList;
+
+typedef struct {
+	struct {
+		size_t capacity;
+		size_t count;
+		char **items;
+	} infiles;
+	char *outfile;
+	uint16_t flags;
+} ApeBuilder;
+
+static ApeCmdList ape_builder_gen_commands(ApeBuilder *builder)
+{
+	ApeCmdList cl = { 0 };
+	for (size_t i = 0; i < builder->infiles.count; i++) {
+		ApeCmd c = ape_gen_build_command(builder->infiles.items[i],
+						 builder->flags);
+		if (c.items)
+			ape_da_append(&cl, c);
+	}
+	ApeCmd c = ape_gen_link_command(builder->outfile,
+					builder->infiles.items,
+					builder->infiles.count, builder->flags);
+	if (c.items)
+		ape_da_append(&cl, c);
+	return cl;
+}
+
 void ape_cmd_render(ApeCmd cmd, ApeStrBuilder *render)
 {
 	for (size_t i = 0; i < cmd.count; i++) {
@@ -458,57 +265,26 @@ void ape_cmd_render(ApeCmd cmd, ApeStrBuilder *render)
 	}
 }
 
-#ifdef _WIN32
-typedef HANDLE ApeProc;
-#define APE_INVALID_PROC INVALID_HANDLE_VALUE
-#else
 typedef int ApeProc;
 #define APE_INVALID_PROC (-1)
-#endif
 
 ApeProc ape_run_cmd_async(ApeCmd cmd)
 {
 	if (cmd.count < 1) {
-		APEERROR("Can't execute empty command");
+		fprintf(stderr, "ERROR: Can't execute empty command\n");
 		return APE_INVALID_PROC;
 	}
 	ApeStrBuilder sb = { 0 };
 	ape_cmd_render(cmd, &sb);
 	ape_da_append(&sb, '\0');
-	eprintf("CMD: %s\n", sb.items);
+	fprintf(stderr, "CMD: %s\n", sb.items);
 	ape_da_free(sb);
 	memset(&sb, 0, sizeof(sb));
 
-#ifdef _WIN32
-	STARTUPINFO siStartInfo;
-	ZeroMemory(&siStartInfo, sizeof(siStartInfo));
-	siStartInfo.cb = sizeof(STARTUPINFO);
-	siStartInfo.hStdError = GetStdHandle(STD_ERROR_HANDLE);
-	siStartInfo.hStdOutput = GetStdHandle(STD_OUTPUT_HANDLE);
-	siStartInfo.hStdInput = GetStdHandle(STD_INPUT_HANDLE);
-	siStartInfo.dwFlags |= STARTF_USESTDHANDLES
-
-		PROCESS_INFORMATION piProcInfo;
-	ZeroMemory(&piProcInfo, sizeof(PROCESS_INFORMATION));
-
-	ape_cmd_render(cmd, &sb);
-	ape_da_append(&sb, '\0');
-	BOOL bSuccess = CreateProcessA(NULL, sb.items, NULL, NULL, TRUE, 0,
-				       NULL, NULL, &siStartInfo, &piProcInfo);
-	ape_da_free(sb);
-
-	if (!bSuccess) {
-		APEERROR("Could not create child process: %lu", GetLastError());
-		return APE_INVALID_PROC;
-	}
-
-	CloseHandle(piProcInfo.hThread);
-	return piProcInfo.hProcess;
-#else
-
 	pid_t cpid = fork();
 	if (cpid < 0) {
-		APEERROR("Could not fork child process: %s", strerror(errno));
+		fprintf(stderr, "ERROR: Could not fork child process: %s\n",
+			strerror(errno));
 		return APE_INVALID_PROC;
 	}
 	if (cpid == 0) {
@@ -516,649 +292,160 @@ ApeProc ape_run_cmd_async(ApeCmd cmd)
 		ape_da_append_many(&cmd_null, cmd.items, cmd.count);
 		ape_cmd_append(&cmd_null, NULL);
 		if (execvp(cmd.items[0], (char *const *)cmd_null.items) < 0) {
-			APEERROR("Could not exec child process: %s",
-				 strerror(errno));
+			fprintf(stderr,
+				"ERROR: Could not exec child process: %s\n",
+				strerror(errno));
 			exit(1);
 		}
 		assert(0 && "Ureachable");
 	}
 	return cpid;
-#endif
 }
 
-bool ape_proc_wait(int proc)
+int ape_proc_wait(int proc)
 {
 	if (proc == -1)
-		return false;
-#ifdef _WIN32
-	DWORD result = WaitForSingleObject(proc, INFINITE);
-	if (result == WAIT_FAILED) {
-		APEERROR("Could not wait on child process: %lu",
-			 GetLastError());
-		return false;
-	}
-
-	DWORD exit_status : if (!GetExitCodeProcess(proc, &exit_status))
-	{
-		APEERROR("Could not get process exit code: %lu",
-			 GetLastError());
-		return false;
-	}
-
-	if (exit_status != 0) {
-		APEERROR("Command exited with exit code: %lu", exit_status);
-		return false;
-	}
-
-	CloseHandle(proc);
-
-	return true;
-#else
-
+		return 0;
 	for (;;) {
 		int wstatus = 0;
 		if (waitpid(proc, &wstatus, 0) < 0) {
-			APEERROR("Could not wait on command (pid %d): %s", proc,
-				 strerror(errno));
-			return false;
+			fprintf(stderr,
+				"ERROR: Could not wait on command (pid "
+				"%d): %s\n",
+				proc, strerror(errno));
+			return 0;
 		}
 		if (WIFEXITED(wstatus)) {
 			int exit_status = WEXITSTATUS(wstatus);
 			if (exit_status != 0) {
-				APEERROR("Command exited with error code: %d",
-					 exit_status);
-				return false;
+				fprintf(stderr,
+					"ERROR: Command exited with "
+					"error code: %d\n",
+					exit_status);
+				return 0;
 			}
 			break;
 		}
 		if (WIFSIGNALED(wstatus)) {
-			APEERROR("Command was terminated by %s",
-				 strsignal(WTERMSIG(wstatus)));
-			return false;
-		}
-	}
-	return true;
-#endif
-}
-
-bool ape_cmd_run_sync(ApeCmd cmd)
-{
-	int p = ape_run_cmd_async(cmd);
-	if (p == -1)
-		return false;
-	return ape_proc_wait(p);
-}
-
-#define APE_FILE_C 1
-#define APE_FILE_CXX 2
-
-static char ape_temp_str[64];
-static int ape_temp_str_s = 0;
-static char ape_temp_str2[64];
-static int ape_temp_str2_s = 0;
-
-/* FIX: Here we are assuming that the string fits inside ape_temp_str */
-#define ape_temp_str_append(fmt, ...)                                         \
-	do {                                                                  \
-		char *_temp = malloc(64);                                     \
-		sprintf(_temp, fmt __VA_OPT__(, ) __VA_ARGS__);               \
-		strncpy(ape_temp_str + ape_temp_str_s, _temp, strlen(_temp)); \
-		ape_temp_str_s += strlen(_temp);                              \
-		ape_temp_str[ape_temp_str_s] = '\0';                          \
-	} while (0)
-
-#define ape_temp_str2_append(fmt, ...)                          \
-	do {                                                    \
-		char *_temp = malloc(64);                       \
-		sprintf(_temp, fmt __VA_OPT__(, ) __VA_ARGS__); \
-		strncpy(ape_temp_str2 + ape_temp_str2_s, _temp, \
-			strlen(_temp));                         \
-		ape_temp_str2_s += strlen(_temp);               \
-		ape_temp_str2[ape_temp_str2_s] = '\0';          \
-	} while (0)
-
-#define ape_temp_str_flush()            \
-	do {                            \
-		ape_temp_str_s = 0;     \
-		ape_temp_str[0] = '\0'; \
-	} while (0)
-
-#define ape_temp_str2_flush()            \
-	do {                             \
-		ape_temp_str2_s = 0;     \
-		ape_temp_str2[0] = '\0'; \
-	} while (0)
-
-typedef struct {
-	int type;
-	char *filename;
-} ApeFile;
-
-typedef struct {
-	size_t capacity;
-	size_t count;
-	ApeFile *items;
-} ApeFileList;
-
-typedef enum {
-	APE_BUILD_EXEC,
-	APE_BUILD_LIB,
-} ApeBuildType;
-
-typedef struct {
-	size_t capacity;
-	size_t count;
-	char **items;
-} ApeStrList;
-
-typedef struct {
-	char *name;
-	char *outname;
-	ApeFileList infiles;
-	ApeFileList testfiles;
-	ApeBuildType type;
-	ApeStrList libs;
-	ApeStrList includes;
-} ApeBuild;
-
-static struct {
-	size_t capacity;
-	size_t count;
-	ApeBuild *items;
-} ApeBuilds = { 0 };
-
-ApeBuild *ape_find_build(char *name)
-{
-	for (size_t i = 0; i < ApeBuilds.count; i++) {
-		if (strcmp(ApeBuilds.items[i].name, name) == 0)
-			return &ApeBuilds.items[i];
-	}
-	return NULL;
-}
-
-#define APE_BUILD_SOURCES_APPEND(name, ...)                           \
-	do {                                                          \
-		ApeBuild *ab = ape_find_build(name);                  \
-		if (ab == NULL) {                                     \
-			APEERROR("Build target not found: %s", name); \
-			break;                                        \
-		}                                                     \
-		char *__flist[] = { __VA_ARGS__, NULL };              \
-		for (size_t i = 0; __flist[i] != NULL; i++) {         \
-			ApeFile f = { 0 };                            \
-			if (ape_endswith(__flist[i], ".c"))           \
-				f.type = APE_FILE_C;                  \
-			if (ape_endswith(__flist[i], ".cpp"))         \
-				f.type = APE_FILE_CXX;                \
-			f.filename = __flist[i];                      \
-			ape_da_append(&(ab->infiles), f);             \
-		}                                                     \
-	} while (0)
-
-#define APE_BUILD_TESTS_APPEND(name, ...)                             \
-	do {                                                          \
-		ApeBuild *ab = ape_find_build(name);                  \
-		if (ab == NULL) {                                     \
-			APEERROR("Build target not found: %s", name); \
-			break;                                        \
-		}                                                     \
-		char *__flist[] = { __VA_ARGS__, NULL };              \
-		for (size_t i = 0; __flist[i] != NULL; i++) {         \
-			ApeFile f = { 0 };                            \
-			if (ape_endswith(__flist[i], ".c"))           \
-				f.type = APE_FILE_C;                  \
-			if (ape_endswith(__flist[i], ".cpp"))         \
-				f.type = APE_FILE_CXX;                \
-			f.filename = __flist[i];                      \
-			ape_da_append(&(ab->testfiles), f);           \
-		}                                                     \
-	} while (0)
-
-#define APE_BUILD_SET_OUTFILE(name, outpath)                          \
-	do {                                                          \
-		ApeBuild *ab = ape_find_build(name);                  \
-		if (ab == NULL) {                                     \
-			APEERROR("Build target not found: %s", name); \
-			break;                                        \
-		}                                                     \
-		ab->outname = outpath;                                \
-	} while (0)
-
-int ape_build_sources_append_dir(char *name, char *path)
-{
-	DIR *dir = opendir(path);
-	struct dirent *entry;
-	if (!dir) {
-		APEERROR("Could not open directory %s", path);
-		return 1;
-	}
-	while ((entry = readdir(dir)) != NULL) {
-		ApeStrBuilder f = { 0 };
-		if (entry->d_name[0] == '.')
-			continue;
-		ape_sb_append_str(&f, path);
-		if (f.items[f.count - 1] != '/')
-			ape_da_append(&f, '/');
-		ape_sb_append_str(&f, entry->d_name);
-		ape_da_append(&f, '\0');
-		struct stat statbuf;
-		if (stat(f.items, &statbuf) < 0) {
-			APEERROR("Could not get stat of %s: %s", f.items,
-				 strerror(errno));
-			return -1;
-		}
-		if ((statbuf.st_mode & S_IFMT) == S_IFDIR) {
-			ape_build_sources_append_dir(name, f.items);
-		}
-#ifdef APELANGC
-		if (!ape_endswith(entry->d_name, ".c"))
-			continue;
-#endif
-#ifdef APELANGCXX
-		if (!ape_endswith(entry->d_name, ".cpp")))
-			continue;
-#endif
-		if ((statbuf.st_mode & S_IFMT) == S_IFREG) {
-			APE_BUILD_SOURCES_APPEND(name, f.items);
-		}
-	}
-	return 0;
-}
-
-int ape_build_tests_append_dir(char *name, char *path)
-{
-	DIR *dir = opendir(path);
-	struct dirent *entry;
-	if (!dir) {
-		APEERROR("Could not open directory %s", path);
-		return 1;
-	}
-	while ((entry = readdir(dir)) != NULL) {
-		ApeStrBuilder f = { 0 };
-		if (entry->d_name[0] == '.')
-			continue;
-		ape_sb_append_str(&f, path);
-		if (f.items[f.count - 1] != '/')
-			ape_da_append(&f, '/');
-		ape_sb_append_str(&f, entry->d_name);
-		ape_da_append(&f, '\0');
-		struct stat statbuf;
-		if (stat(f.items, &statbuf) < 0) {
-			APEERROR("Could not get stat of %s: %s", f.items,
-				 strerror(errno));
-			return -1;
-		}
-		switch (statbuf.st_mode & S_IFMT) {
-		case S_IFDIR:
-			ape_build_tests_append_dir(name, f.items);
-			break;
-		case S_IFREG:
-			APE_BUILD_TESTS_APPEND(name, f.items);
-			break;
-		default:
-			break;
+			fprintf(stderr, "Command was terminated by %s\n",
+				strsignal(WTERMSIG(wstatus)));
+			return 0;
 		}
 	}
 	return 1;
 }
 
-#define APE_BUILD_LIBS_APPEND(name, ...)                                      \
-	do {                                                                  \
-		ApeBuild *ab = ape_find_build(name);                          \
-		if (ab == NULL) {                                             \
-			APEERROR("Build target not found: %s", name);         \
-			break;                                                \
-		}                                                             \
-		ape_da_append_many(&(ab->libs),                               \
-				   ((const char *[]){ __VA_ARGS__ }),         \
-				   (sizeof((const char *[]){ __VA_ARGS__ }) / \
-				    sizeof(const char *)));                   \
-	} while (0)
-
-#define APE_BUILD_INCLUDES_APPEND(name, incl)                         \
-	do {                                                          \
-		ApeBuild *ab = ape_find_build(name);                  \
-		if (ab == NULL) {                                     \
-			APEERROR("Build target not found: %s", name); \
-			break;                                        \
-		}                                                     \
-		ape_da_append(&(ab->includes), incl);                 \
-	} while (0)
-
-#define APE_BUILD_EXEC(bname)                                          \
-	ape_da_append(&ApeBuilds, ((ApeBuild){ .name = bname,          \
-					       .outname = bname,       \
-					       .infiles = { 0 },       \
-					       .type = APE_BUILD_EXEC, \
-					       .libs = { 0 },          \
-					       .includes = { 0 } }))
-
-#define APE_BUILD_LIB(bname)                                          \
-	ape_da_append(&ApeBuilds, ((ApeBuild){ .name = bname,         \
-					       .outname = bname,      \
-					       .infiles = { 0 },      \
-					       .type = APE_BUILD_LIB, \
-					       .libs = { 0 },         \
-					       .includes = { 0 } }))
-
-int ape_needs_rebuild(const char *outfile, ApeStrList *infiles)
+int ape_cmd_run_sync(ApeCmd cmd)
 {
-#ifdef _WIN32
-	BOOL bSuccess;
-	HANDLE outpath_fd = CreateFile(outfile, GENERIC_READ, 0, NULL,
-				       OPEN_EXISTING, FILE_ATTRIBUTE_READONLY,
-				       NULL);
-	if (outpath_fd == INVALID_HANDLE_VALUE) {
-		if (GetLastError() == ERROR_FILE_NOT_FOUND)
-			return 1;
-		APEERROR("Could not open file %s: %lu", outfile,
-			 GetLastError());
-		return -1;
+	int p = ape_run_cmd_async(cmd);
+	if (p == -1)
+		return 0;
+	return ape_proc_wait(p);
+}
+
+int ape_cmds_run(ApeCmdList cmds)
+{
+	for (size_t i = 0; i < cmds.count; i++) {
+		int p = ape_cmd_run_sync(cmds.items[i]);
+		if (!p)
+			return 0;
 	}
-	FILETIME outpath_time;
-	bSuccess = GetFileTime(outfile, NULL, NULL, &outpath_time);
-	CloseHandle(outpath_fd);
-	if (!bSuccess) {
-		APEERROR("Could not get time of %s: %lu", outfile,
-			 GetLastError());
-		return -1;
-	}
-	for (size_t i = 0; i < infiles->count; i++) {
-		const char *infile = infiles->items[i];
-		HANDLE inpath_fd = CreateFile(infile, GENERIC_READ, 0, NULL,
-					      OPEN_EXISTING,
-					      FILE_ATTRIBUTE_READONLY, NULL);
-		if (inpath_fd == INVALID_HANDLE_VALUE) {
-			APEERROR("Could not open file %s: %lu", infile,
-				 GetLastError());
-			return -1;
-		}
-		FILETIME inpath_time;
-		bSuccess = GetFileTime(inpath_fd, NULL, NULL, &inpath_time);
-		CloseHandle(inpath_fd);
-		if (!bSuccess) {
-			APEERROR("Could not get time of %s: %lu", infile,
-				 GetLastError());
-			return -1;
-		}
-		if (CompareFileTime(&inpath_time, &outpath_time) == 1)
-			return 1;
-	}
-	return 0;
-#else
-	struct stat outs;
-	if (stat(outfile, &outs) != 0) {
+	return 1;
+}
+
+void ape_builder_append_file(ApeBuilder *builder, char *path)
+{
+	ape_da_append(&builder->infiles, path);
+}
+
+int ape_endswith(char *s, const char *suffix)
+{
+	if (!s || !suffix)
+		return 0;
+	size_t lens = strlen(s);
+	size_t lensuf = strlen(suffix);
+	if (lensuf > lens)
+		return 0;
+	return strncmp(s + lens - lensuf, suffix, lensuf) == 0;
+}
+
+int ape_builder_append_dir(ApeBuilder *builder, char *path)
+{
+	DIR *dir = opendir(path);
+	struct dirent *entry;
+	if (!dir) {
+		fprintf(stderr, "ERROR: Could not open directory %s\n", path);
 		return 1;
 	}
-	struct stat ins;
-	for (size_t i = 0; i < infiles->count; i++) {
-		if (stat(infiles->items[i], &ins) != 0) {
-			APEERROR("Failed to get stat (of file %s): %s",
-				 infiles->items[i], strerror(errno));
+	while ((entry = readdir(dir)) != NULL) {
+		if (entry->d_name[0] == '.')
+			continue;
+		if (!ape_endswith(entry->d_name, APE_SRC_EXTENSION))
+			continue;
+		ApeStrBuilder pathbuilder = { 0 };
+		ape_sb_append_str(&pathbuilder, path);
+		if (pathbuilder.items[pathbuilder.count - 1] != '/')
+			ape_da_append(&pathbuilder, '/');
+		ape_sb_append_str(&pathbuilder, entry->d_name);
+		ape_da_append(&pathbuilder, 0);
+		struct stat statbuf;
+		if (stat(pathbuilder.items, &statbuf) < 0) {
+			fprintf(stderr, "ERROR: Could not get stat of %s: %s\n",
+				pathbuilder.items, strerror(errno));
 			return 1;
 		}
-		if (ins.st_mtime > outs.st_mtime) {
-			return 1;
-		}
+		if ((statbuf.st_mode & S_IFMT) == S_IFREG)
+			ape_builder_append_file(builder, pathbuilder.items);
 	}
 	return 0;
-#endif
 }
 
-int ape_needs_rebuild1(const char *outfile, const char *infile)
+int ape_builder_append_dir_recursive(ApeBuilder *builder, char *path)
 {
-	ApeStrList s = { 0 };
-	ape_da_append(&s, (char *)infile);
-	return ape_needs_rebuild(outfile, &s);
-}
-
-static int ape_rebuild_all = 0;
-
-char *ape_build_file(ApeFile *file, ApeStrList *includes, ApeBuildTarget target)
-{
-	ApeStrBuilder outfname = { 0 };
-	ape_sb_append_str(&outfname, strdup(file->filename));
-	ape_sb_append_str(&outfname, ".o");
-	ape_da_append(&outfname, '\0');
-	if (!ape_needs_rebuild1(outfname.items, file->filename) &&
-	    !ape_rebuild_all)
-		return outfname.items;
-	ApeCmd cmd = { 0 };
-#ifdef APELANGC
-	if (file->type == APE_FILE_C) {
-		ape_cmd_append(&cmd, APECC);
-#ifdef _APECFLAGS
-		ape_cmd_append(&cmd, _APECFLAGS);
-#endif
-#ifdef _APECFLAGS_DEBUG
-		if (target == APE_TARGET_DEBUG || target == APE_TARGET_TEST) {
-			ape_cmd_append(&cmd, _APECFLAGS_DEBUG);
-		}
-#endif
-		if (target == APE_TARGET_TEST) {
-			ape_cmd_append(&cmd, "-DTEST");
-		}
+	DIR *dir = opendir(path);
+	struct dirent *entry;
+	if (!dir) {
+		fprintf(stderr, "ERROR: Could not open directory %s\n", path);
+		return 1;
 	}
-#endif
-#ifdef APELANGCXX
-	if (file->type == APE_FILE_CXX) {
-		ape_cmd_append(&cmd, APECXX);
-#ifdef _APECXXFLAGS
-		ape_cmd_append(&cmd, _APECXXFLAGS);
-#endif
-#ifdef _APECXXFLAGS_DEBUG
-		if (target == APE_TARGET_DEBUG || target == APE_TARGET_TEST) {
-			ape_cmd_append(&cmd, _APECXXFLAGS_DEBUG);
-		}
-#endif
-		if (target == APE_TARGET_TEST) {
-			ape_cmd_append(&cmd, "-DTEST");
-		}
-	}
-#endif
-	if (file->type == 0) {
-		ape_temp_str2_flush();
-		return NULL;
-	}
-	if (includes->count > 0) {
-		for (size_t i = 0; i < includes->count; i++) {
-			ApeStrBuilder I = { 0 };
-			ape_sb_append_str(&I, "-I");
-			ape_sb_append_str(&I, strdup(includes->items[i]));
-			ape_da_append(&I, '\0');
-			ape_cmd_append(&cmd, I.items);
-		}
-	}
-	ape_cmd_append(&cmd, file->filename);
-	ape_cmd_append(&cmd, "-o");
-	ape_cmd_append(&cmd, outfname.items);
-	eprintf("%s", ape_temp_str);
-	eprintf("%s", ape_temp_str2);
-	ape_temp_str2_flush();
-	ape_cmd_run_sync(cmd);
-	return outfname.items;
-}
-
-ApeStrList ape_build_sources(ApeFileList *files, ApeStrList *includes,
-			     ApeBuildTarget target)
-{
-	ApeStrList out = { 0 };
-	for (size_t i = 0; i < files->count; i++) {
-		int p = 100 / files->count * i;
-		ape_temp_str2_append("[" FG_GREEN "%d%%" RESET "] ", p);
-		char *ob = ape_build_file(&(files->items[i]), includes, target);
-		ape_temp_str2_flush();
-		if (ob != NULL)
-			ape_da_append(&out, ob);
-	}
-	return out;
-}
-
-void ape_link_files(ApeStrList *files, ApeStrList *libs, char *outfname,
-		    ApeBuildTarget target, ApeBuildType type)
-{
-	ApeCmd cmd = { 0 };
-	ape_cmd_append(&cmd, APELD);
-	if (type == APE_BUILD_LIB) {
-		ape_cmd_append(&cmd, "--shared");
-	}
-	ape_cmd_append(&cmd, "-o", outfname);
-	ape_da_append_many(&cmd, files->items, files->count);
-	if (libs->count > 0) {
-		for (size_t i = 0; i < libs->count; i++) {
-			ApeStrBuilder l = { 0 };
-			ape_sb_append_str(&l, "-l");
-			ape_sb_append_str(&l, strdup(libs->items[i]));
-			ape_da_append(&l, '\0');
-			ape_cmd_append(&cmd, l.items);
-		}
-	}
-#ifdef APELDFLAGS
-	ape_cmd_append(&cmd, APELDFLAGS);
-#endif
-	ape_temp_str2_append("[" FG_GREEN "100%%" RESET "] ");
-	eprintf("%s", ape_temp_str);
-	eprintf("%s", ape_temp_str2);
-	ape_temp_str2_flush();
-	ape_cmd_run_sync(cmd);
-}
-
-void ape_build_target(char *name, ApeBuildTarget target)
-{
-	ApeBuild *ab = ape_find_build(name);
-	if (ab == NULL) {
-		APEERROR("Couldn't build target %s", name);
-		exit(1);
-	}
-	ApeStrList obj =
-		ape_build_sources(&(ab->infiles), &(ab->includes), target);
-	if (obj.count > 0 &&
-	    (ape_needs_rebuild(ab->outname, &obj) || ape_rebuild_all)) {
-		ape_link_files(&obj, &(ab->libs), ab->outname, target,
-			       ab->type);
-	} else {
-		APEINFO("No files to build");
-	}
-}
-
-void ape_build_all_target(ApeBuildTarget target)
-{
-	for (size_t i = 0; i < ApeBuilds.count; i++) {
-		ape_temp_str_flush();
-		ape_temp_str_append("[%ld/%ld] ", i + 1, ApeBuilds.count);
-		ApeStrList obj = ape_build_sources(
-			&(ApeBuilds.items[i].infiles),
-			&(ApeBuilds.items[i].includes), target);
-		if (obj.count > 0 &&
-		    (ape_needs_rebuild(ApeBuilds.items[i].outname, &obj) ||
-		     ape_rebuild_all)) {
-			ape_link_files(&obj, &(ApeBuilds.items[i].libs),
-				       ApeBuilds.items[i].outname, target,
-				       ApeBuilds.items[i].type);
-		} else {
-			APEINFO("No files to build");
-		}
-	}
-}
-
-void ape_build_tests(char *name)
-{
-	ApeBuild *ab = ape_find_build(name);
-	if (ab == NULL) {
-		APEERROR("Couldn't build target %s", name);
-		exit(1);
-	}
-	ApeStrList obj = ape_build_sources(&(ab->infiles), &(ab->includes),
-					   APE_TARGET_TEST);
-	ApeStrList tobj = ape_build_sources(&(ab->testfiles), &(ab->includes),
-					    APE_TARGET_TEST);
-	ape_da_append_many(&obj, tobj.items, tobj.count);
-	if (obj.count > 0 &&
-	    (ape_needs_rebuild(ab->outname, &obj) || ape_rebuild_all)) {
-		ape_link_files(&obj, &(ab->libs), ab->outname, APE_TARGET_TEST,
-			       ab->type);
-	} else {
-		APEINFO("No files to build");
-	}
-}
-
-int ape_run(char *name, char **args)
-{
-	ApeBuild *ab = ape_find_build(name);
-	if (ab == NULL) {
-		APEERROR("Couldn't run target %s", name);
-		exit(1);
-	}
-	ApeCmd cmd = { 0 };
-	ApeStrBuilder sb = { 0 };
-	ape_sb_append_str(&sb, "./");
-	ape_sb_append_str(&sb, ab->outname);
-	ape_cmd_append(&cmd, sb.items);
-	char **a = args;
-	while ((*a) != NULL) {
-		ape_cmd_append(&cmd, (*a));
-		a++;
-	}
-	return ape_cmd_run_sync(cmd);
-}
-
-void ape_run_all()
-{
-	for (size_t i = 0; i < ApeBuilds.count; i++) {
-		ApeCmd cmd = { 0 };
-		ApeStrBuilder sb = { 0 };
-		ape_sb_append_str(&sb, "./");
-		ape_sb_append_str(&sb, ApeBuilds.items[i].outname);
-		ape_cmd_append(&cmd, sb.items);
-		ape_cmd_run_sync(cmd);
-	}
-}
-
-void ape_run_tests(char *name)
-{
-	ApeBuild *ab = ape_find_build(name);
-	if (ab == NULL) {
-		APEERROR("Couldn't run target %s", name);
-		exit(1);
-	}
-	if (ab->testfiles.count <= 0) {
-		APEERROR("Target %s doesn't contain tests", name);
-		exit(1);
-	}
-	ape_build_tests(name);
-	ApeCmd cmd = { 0 };
-	ApeStrBuilder sb = { 0 };
-	ape_sb_append_str(&sb, "./");
-	ape_sb_append_str(&sb, ab->outname);
-	ape_cmd_append(&cmd, sb.items);
-	ape_cmd_run_sync(cmd);
-}
-
-void ape_run_tests_all()
-{
-	for (size_t i = 0; i < ApeBuilds.count; i++) {
-		if (ApeBuilds.items[i].testfiles.count <= 0)
+	while ((entry = readdir(dir)) != NULL) {
+		if (entry->d_name[0] == '.')
 			continue;
-		ape_build_tests(ApeBuilds.items[i].outname);
-		ApeCmd cmd = { 0 };
-		ApeStrBuilder sb = { 0 };
-		ape_sb_append_str(&sb, "./");
-		ape_sb_append_str(&sb, ApeBuilds.items[i].outname);
-		ape_cmd_run_sync(cmd);
+		ApeStrBuilder pathbuilder = { 0 };
+		ape_sb_append_str(&pathbuilder, path);
+		if (pathbuilder.items[pathbuilder.count - 1] != '/')
+			ape_da_append(&pathbuilder, '/');
+		ape_sb_append_str(&pathbuilder, entry->d_name);
+		ape_da_append(&pathbuilder, 0);
+		struct stat statbuf;
+		if (stat(pathbuilder.items, &statbuf) < 0) {
+			fprintf(stderr, "ERROR: Could not get stat of %s: %s\n",
+				pathbuilder.items, strerror(errno));
+			return 1;
+		}
+		if ((statbuf.st_mode & S_IFMT) == S_IFDIR)
+			ape_builder_append_dir(builder, pathbuilder.items);
+		if (!ape_endswith(entry->d_name, APE_SRC_EXTENSION))
+			continue;
+		if ((statbuf.st_mode & S_IFMT) == S_IFREG)
+			ape_builder_append_file(builder, pathbuilder.items);
 	}
+	return 0;
 }
 
 int ape_rename(const char *oldname, const char *newname)
 {
 	if (rename(oldname, newname) == 0) {
-		APEINFO("%s > %s", oldname, newname);
+		fprintf(stderr, "INFO: %s > %s\n", oldname, newname);
 		return 1;
 	}
-	APEERROR("Couldn't rename file %s: %s", oldname, strerror(errno));
+	fprintf(stderr, "ERROR: Couldn't rename file %s: %s\n", oldname,
+		strerror(errno));
 	return 0;
 }
 
-#define _APE_REBUILD(binpath, srcpath) APECC, "-o", binpath, srcpath
+#define _APE_REBUILD(binpath, srcpath) \
+	APEBUILD_REBUILD_COMMAND(binpath, srcpath)
 
 #define APE_REBUILD(argc, argv)                                            \
 	do {                                                               \
@@ -1178,7 +465,7 @@ int ape_rename(const char *oldname, const char *newname)
 			ApeCmd rebuild = { 0 };                            \
 			ape_cmd_append(&rebuild,                           \
 				       _APE_REBUILD(binpath, srcpath));    \
-			bool rebuilt = ape_cmd_run_sync(rebuild);          \
+			int rebuilt = ape_cmd_run_sync(rebuild);           \
 			if (!rebuilt) {                                    \
 				ape_rename(sb.items, binpath);             \
 				exit(1);                                   \
@@ -1191,88 +478,27 @@ int ape_rename(const char *oldname, const char *newname)
 		}                                                          \
 	} while (0)
 
-#define APEBUILD_SUCCESS 0
-#define APEBUILD_ERROR 1
-#define _APEBUILD_CUSTOM 2
-#define APEBUILD_CUSTOM(fmt, ...)                 \
-	APEERROR(fmt __VA_OPT__(, ) __VA_ARGS__); \
-	return _APEBUILD_CUSTOM
+#define APE_BUILDER(name, input)                                            \
+	do {                                                                \
+		ApeBuilder ape__builder = (ApeBuilder){ .outfile = name };  \
+		{ input } ApeCmdList ape__builder_cmds =                    \
+			ape_builder_gen_commands(&ape__builder);            \
+		ape_cmds_run(ape__builder_cmds);                            \
+		if ((ape__builder.flags >> APE_FLAG_RUN_AFTER_BUILD) & 1) { \
+			ApeCmd cmd = { 0 };                                 \
+			ApeStrBuilder sb = { 0 };                           \
+			ape_sb_append_str(&sb, "./");                       \
+			ape_sb_append_str(&sb, ape__builder.outfile);       \
+			ape_da_append(&sb, 0);                              \
+			ape_cmd_append(&cmd, sb.items);                     \
+			ape_cmd_run_sync(cmd);                              \
+		}                                                           \
+	} while (0);
 
-#define APEBUILD_MAIN(a_argc, a_argv)             \
-	int apebuild_main(a_argc, a_argv);        \
-	int main(int argc, char **argv)           \
-	{                                         \
-		APE_REBUILD(argc, argv);          \
-		ape_temp_str_flush();             \
-		ape_temp_str2_flush();            \
-		return apebuild_main(argc, argv); \
-	}                                         \
-	int apebuild_main(a_argc, a_argv)
+#define APE_INPUT_DIR(path) ape_builder_append_dir(&ape__builder, path)
+#define APE_INPUT_DIR_REC(path) \
+	ape_builder_append_dir_recursive(&ape__builder, path)
+#define APE_INPUT_FILE(path) ape_builder_append_file(&ape__builder, path)
 
-#ifdef _WIN32
-
-struct DIR {
-	HANDLE hFind;
-	WIN32_FIND_DATA data;
-	struct dirent *dirent;
-};
-
-struct dirent {
-	char d_name[MAX_PATH + 1];
-};
-
-DIR *opendir(const char *dirpath)
-{
-	assert(dirpath);
-	char buffer[MAX_PATH];
-	snprintf(buffer, MAX_PATH, "%s\\*", dirpath);
-	DIR *dir = (DIR *)calloc(1, sizeof(DIR));
-	dir->hFind = FindFirstFile(buffer, &dir->data);
-	if (dir->hFind == INVALID_HANDLE_VALUE) {
-		errno = ENOSYS;
-		goto fail;
-	}
-	return dir;
-	if (dir) {
-		free(dir);
-	}
-	return NULL;
-}
-
-struct dirent *readdir(DIR *dirp)
-{
-	assert(dirp);
-	if (dirp->dirent == NULL) {
-		dirp->dirent = (struct dirent *)calloc(1, sizeof(dirent));
-	} else {
-		if (!FindNextFile(dirp->hFind, &dirp->data)) {
-			if (GetLastError() != ERROR_NO_MORE_FILES) {
-				errno = ENOSYS;
-			}
-			return NULL;
-		}
-	}
-	memset(dirp->dirent->d_name, 0, sizeof(dirp->dirent->d_name));
-	strncpy(dirp->dirent->d_name, dirp->data.cFileName,
-		sizeof(dirp->dirent->d_name) - 1);
-	return dirp->dirent;
-}
-
-int closedir(DIR *dirp)
-{
-	assert(dirp);
-	if (!FindClose(dirp->hFind)) {
-		errno = ENOSYS;
-		return -1;
-	}
-	if (dirp->dirent) {
-		free(dirp->dirent);
-	}
-	free(dirp);
-	return 0;
-}
-
-#endif
-
-#endif
+#define APE_SET_FLAG(flag) (ape__builder.flags |= (1 << flag))
 #endif

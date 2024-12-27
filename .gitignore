@@ -1,0 +1,5 @@
+apebuild
+apebuild.old
+example
+.cache
+src/*.o
