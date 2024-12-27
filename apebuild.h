@@ -1,4 +1,8 @@
 #include <stdint.h>
+/* FIX: Remove these lines */
+#define APEBUILD_IMPLEMENTATION
+#define APE_PRESET_LINUX_GCC_C
+/* FIX: Stop removing here */
 #ifndef APEBUILD_IMPLEMENTATION
 #pragma GCC error("Define APEBUILD_IMPLEMENTATION before including apebuild.h")
 #else
@@ -89,6 +93,8 @@
 
 #define APE_FLAG_REBUILD 1
 #define APE_FLAG_RUN_AFTER_BUILD 2
+
+int ape__watch = 0;
 
 #define ape_da_append(da, x)                                              \
 	do {                                                              \
@@ -229,6 +235,12 @@ typedef struct {
 	char *outfile;
 	uint16_t flags;
 } ApeBuilder;
+
+static struct {
+	size_t capacity;
+	size_t count;
+	ApeBuilder *items;
+} ape__builder_list;
 
 static ApeCmdList ape_builder_gen_commands(ApeBuilder *builder)
 {
@@ -478,21 +490,10 @@ int ape_rename(const char *oldname, const char *newname)
 		}                                                          \
 	} while (0)
 
-#define APE_BUILDER(name, input)                                            \
-	do {                                                                \
-		ApeBuilder ape__builder = (ApeBuilder){ .outfile = name };  \
-		{ input } ApeCmdList ape__builder_cmds =                    \
-			ape_builder_gen_commands(&ape__builder);            \
-		ape_cmds_run(ape__builder_cmds);                            \
-		if ((ape__builder.flags >> APE_FLAG_RUN_AFTER_BUILD) & 1) { \
-			ApeCmd cmd = { 0 };                                 \
-			ApeStrBuilder sb = { 0 };                           \
-			ape_sb_append_str(&sb, "./");                       \
-			ape_sb_append_str(&sb, ape__builder.outfile);       \
-			ape_da_append(&sb, 0);                              \
-			ape_cmd_append(&cmd, sb.items);                     \
-			ape_cmd_run_sync(cmd);                              \
-		}                                                           \
+#define APE_BUILDER(name, input)                                           \
+	do {                                                               \
+		ApeBuilder ape__builder = (ApeBuilder){ .outfile = name }; \
+		{ input } ape_da_append(&ape__builder_list, ape__builder); \
 	} while (0);
 
 #define APE_INPUT_DIR(path) ape_builder_append_dir(&ape__builder, path)
@@ -501,4 +502,90 @@ int ape_rename(const char *oldname, const char *newname)
 #define APE_INPUT_FILE(path) ape_builder_append_file(&ape__builder, path)
 
 #define APE_SET_FLAG(flag) (ape__builder.flags |= (1 << flag))
+
+#define APE_WATCH() ape__watch = 1;
+
+static void watch_and_build(ApeBuilder *builder)
+{
+	uint16_t flags = 0;
+	while (1) {
+		for (size_t i = 0; i < builder->infiles.count; i++) {
+			ApeCmd cmd = ape_gen_build_command(
+				builder->infiles.items[i], flags);
+			if (cmd.items) {
+				fprintf(stderr,
+					"INFO: File %s changed, "
+					"rebuilding...\n",
+					builder->infiles.items[i]);
+				ape_cmd_run_sync(cmd);
+			}
+		}
+		ApeCmd cmd = ape_gen_link_command(builder->outfile,
+						  builder->infiles.items,
+						  builder->infiles.count,
+						  flags);
+		if (cmd.items[0]) {
+			fprintf(stderr, "INFO: Inputs changed, rebuilding "
+					"executable...\n");
+			ape_cmd_run_sync(cmd);
+		}
+		sleep(1);
+	}
+}
+
+static void ape_watch_run_builder(ApeBuilder *builder)
+{
+	uint16_t flags = 0;
+	for (size_t i = 0; i < builder->infiles.count; i++) {
+		ApeCmd cmd =
+			ape_gen_build_command(builder->infiles.items[i], flags);
+		if (cmd.items) {
+			fprintf(stderr,
+				"INFO: File %s changed, "
+				"rebuilding...\n",
+				builder->infiles.items[i]);
+			ape_cmd_run_sync(cmd);
+		}
+	}
+	ApeCmd cmd = ape_gen_link_command(builder->outfile,
+					  builder->infiles.items,
+					  builder->infiles.count, flags);
+	if (cmd.items) {
+		fprintf(stderr, "INFO: Inputs changed, rebuilding "
+				"executable...\n");
+		ape_cmd_run_sync(cmd);
+	}
+}
+
+static void ape_run_builder(ApeBuilder *builder)
+{
+	ApeCmdList cmds = ape_builder_gen_commands(builder);
+	ape_cmds_run(cmds);
+}
+
+#define APEBUILD_MAIN(...)                                                     \
+	int apebuild_main(int argc, char **argv);                              \
+	int main(int argc, char **argv)                                        \
+	{                                                                      \
+		APE_REBUILD(argc, argv);                                       \
+		int ape__return_code = apebuild_main(argc, argv);              \
+		if (ape__return_code != 0)                                     \
+			return ape__return_code;                               \
+		if (ape__watch) {                                              \
+			while (1) {                                            \
+				for (size_t i = 0;                             \
+				     i < ape__builder_list.count; i++) {       \
+					ape_watch_run_builder(                 \
+						&ape__builder_list.items[i]);  \
+				}                                              \
+			}                                                      \
+		} else                                                         \
+			for (size_t i = 0; i < ape__builder_list.count; i++) { \
+				ape_run_builder(&ape__builder_list.items[i]);  \
+			}                                                      \
+		wait(NULL);                                                    \
+		return 0;                                                      \
+	}                                                                      \
+	int apebuild_main(int argc, char **argv)
+
 #endif
