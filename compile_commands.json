@@ -1,29 +1,15 @@
 [
   {
     "arguments": [
-      "/usr/bin/gcc",
-      "-c",
-      "-o",
-      "./apebuild",
-      "apebuild.c"
-    ],
-    "directory": "/home/aamos/src/apebuild",
-    "file": "/home/aamos/src/apebuild/apebuild.c",
-    "output": "/home/aamos/src/apebuild/apebuild"
-  },
-  {
-    "arguments": [
-      "/usr/bin/gcc",
-      "-c",
-      "-Wall",
-      "-Werror",
+      "/nix/store/4apajimszc47rxwcpvc3g3rj2icinl71-gcc-wrapper-13.3.0/bin/gcc",
       "-Iinclude",
+      "-c",
       "-o",
       "src/example.c.o",
       "src/example.c"
     ],
-    "directory": "/home/aamos/src/apebuild",
-    "file": "/home/aamos/src/apebuild/src/example.c",
-    "output": "/home/aamos/src/apebuild/src/example.c.o"
+    "directory": "/home/aamosp/src/apebuild",
+    "file": "/home/aamosp/src/apebuild/src/example.c",
+    "output": "/home/aamosp/src/apebuild/src/example.c.o"
   }
 ]
