@@ -1,15 +1,15 @@
-/* Include file for the apebuild.h example */
-#ifndef _EXAMPLE_H
-#define _EXAMPLE_H
+#ifndef _EXAMPLE_H_
+#define _EXAMPLE_H_
 
-#include <assert.h>
+#include <stddef.h>
+#include <stdio.h>
 
 static char *shift_args(int *argc, char ***argv) {
-	assert((*argc) > 0);
-	char *arg = (*argv)[0];
-	(*argc)--;
+	if ((*argc) <= 0) return NULL;
+	char *out = (*argv)[0];
 	(*argv)++;
-	return arg;
+	(*argc)--;
+	return out;
 }
 
 #endif
