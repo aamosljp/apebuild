@@ -1,3 +1,41 @@
+/*
+===============================================================================
+Apebuild: A minimal build system for C, written in a single header file
+===============================================================================
+
+Apebuild is a single-header, lightweight build system for C.
+
+Quick Start Guide
+=================
+
+Create a source file with the following content:
+
+    #define APEBUILD_IMPLEMENTATION
+    #define APE_PRESET_LINUX_GCC_C
+    #include "apebuild.h"
+    
+    APEBUILD_MAIN(int argc, char **argv) {
+        APE_BUILDER("example", {
+            APE_INPUT_DIR("src/");
+            APE_INCLUDE_DIR("include/");
+        });
+        return ape_run(argc, argv);
+    }
+
+Then run gcc or whatever compiler you want and build it.
+You should never have to rebuild the file manually, it will handle that as well.
+
+You can go look at the example included in this repository as well.
+It has a few more options but everything will be explained below.
+
+TODO: Documentation
+
+*/
+
+
+/* NOTE: Your LS will probably complain about some of these includes,
+ * you should just ignore the warnings
+ */
 #define __STDC_WANT_LIB_EXT1__ 1
 #include <dirent.h>
 #include <sys/stat.h>
@@ -214,10 +252,6 @@ enum ApeFlag {
 	"If you are building libraries, you should define APE_LINK_ARGS_SHARED_LIB"
 #endif
 
-/*************************
- * Dynamic Array Start
- *************************/
-
 #define APE_DA_INIT_CAP 256
 
 #define ape_da_append(da, x)                                              \
@@ -259,14 +293,6 @@ enum ApeFlag {
 		size_t n = strlen(s);         \
 		ape_da_append_many(sb, s, n); \
 	} while (0)
-
-/*************************
- * Dynamic Array End
- *************************/
-
-/*************************
- * Command Utilities Start
- *************************/
 
 #define ape_cmd_append(cmd, ...)                                      \
 	ape_da_append_many(cmd, ((const char *[]){ __VA_ARGS__ }),    \
@@ -378,14 +404,6 @@ int ape_cmds_run(ApeCmdList cmds)
 	return 1;
 }
 
-/*************************
- * Command Utilities End
- *************************/
-
-/*************************
- * File Utilities Start
- *************************/
-
 int ape_rename(const char *oldname, const char *newname)
 {
 	if (rename(oldname, newname) == 0) {
@@ -442,14 +460,6 @@ int ape_endswith(char *s, const char *suffix)
 		return 0;
 	return strncmp(s + lens - lensuf, suffix, lensuf) == 0;
 }
-
-/*************************
- * File Utilities End
- *************************/
-
-/*************************
- * ApeBuilder Start
- *************************/
 
 ApeCmd ape_gen_build_command(char *srcfilename, uint16_t flags, ApeStrList args)
 {
@@ -619,14 +629,6 @@ int ape_run_builder(ApeBuilder *builder)
 	return r;
 }
 
-/*************************
- * ApeBuilder End
- *************************/
-
-/*************************
- * Execution Start
- *************************/
-
 int ape_run(int argc, char **argv)
 {
 	for (size_t i = 0; i < ape__builder_list.count; i++) {
@@ -638,9 +640,5 @@ int ape_run(int argc, char **argv)
 	}
 	return 0;
 }
-
-/*************************
- * Execution End
- *************************/
 
 #endif

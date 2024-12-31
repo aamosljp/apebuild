@@ -1,31 +1,55 @@
-# ApeBuild
+# Apebuild: A Minimal Build System in C
 
-A single header C/C++ build system.
+Apebuild is a single-header, lightweight build system written in C.  
+Currently, it's only used in a handful of my personal projects.
+I mostly add features when I feel like it, but you are welcome to conribute.
+
+# How It Works
+
+You define build rules using the `APE_BUILDER` macro.  
+Example:
+```c
+APE_BUILDER("example", {
+    APE_INPUT_DIR("src/");
+    APE_SET_FLAG(APE_FLAG_REBUILD);
+});
+```
+
+Apebuild generates and runs commands dynamically based on your definitions.  
 
 # Usage
 
-Just include apebuild.h in one source file, see the top of that file for
-more instructions.
+```c
+#define APEBUILD_IMPLEMENTATION
+#define APE_PRESET_LINUX_GCC_C
+#include "apebuild.h"
 
-You can also check the example in apebuild.c to see it in action. Build it using:
-```bash
-gcc -o apebuild apebuild.c
+APEBUILD_MAIN(int argc, char **argv) {
+    APE_BUILDER("example", {
+        APE_INPUT_DIR("src/");
+        APE_SET_FLAG(APE_FLAG_REBUILD);
+    });
+    return ape_run(argc, argv);
+}
 ```
-And then run apebuild:
-```bash
-./apebuild
-```
-
-# Contributing
-
-See the below TODO list and see if you can implement any of those features, you
-can also add features not in the list but those are not guaranteed to be merged
-into this repository
 
 # TODO
 
-**NOTE: This is mainly for my personal projects, so I'm probably not going to
-add features unless I need them myself**(see Contributing)
+- [ ] Add support for Windows toolchains.
+- [ ] Improve library detection.
+- [ ] Provide parallel build support.
 
-- [ ] Make cross-platform (Should work on windows now, haven't tested it though)
-- [ ] Actually make building libraries work
+# Contributions
+
+Contributions are welcome!  
+To contribute:
+1. Fork the repository.
+2. Create a feature branch.
+3. Submit a pull request.
+
+GitHub: [Apebuild Repository](https://github.com/aamosljp/apebuild)
+
+# License
+
+Apebuild is in the public domain.
+
