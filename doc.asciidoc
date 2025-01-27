@@ -250,22 +250,29 @@ int should_rebuild(const char *source, const char *object, const char *dependenc
 [plantuml]
 ----
 @startuml
-start :Check if source file exists;
+Start
+:Check if source file exists;
 if (Source file missing?) then (Yes)
-    :Error, rebuild required; stop
-else (No) :Check if object file exists;
+    :Error, rebuild required;
+    Stop
+else (No)
+    :Check if object file exists;
     if (Object file missing?) then (Yes)
-        :Rebuild required; stop
-    else (No)
+        :Rebuild required;
+        Stop
+    else
         :Compare timestamps of source and object files;
         if (Source newer?) then (Yes)
-            :Rebuild required; stop
-        else (No)
+            :Rebuild required;
+            Stop
+        else
             :Check user-defined dependencies;
             if (Dependency newer?) then (Yes)
-                :Rebuild required; stop
-            else (No)
-                :No rebuild required; stop
+                :Rebuild required;
+                Stop
+            else
+                :No rebuild required;
+                Stop
             endif
         endif
     endif
@@ -371,15 +378,18 @@ The compilation process can be visualized as follows:
 [plantuml]
 ----
 @startuml
-start :Iterate over source files;
-    :Generate object file name;
-    :Build compiler command;
-    if (Compilation successful?) then (Yes)
-        :Move to next file;
-    else (No)
-        :Report error; stop
-    endif
-:All files compiled successfully; stop
+Start
+:Iterate over source files;
+:Generate object file name;
+:Build compiler command;
+if (Compilation successful?) then (Yes)
+    :Move to next file;
+else (No)
+    :Report error;
+    Stop
+endif
+:All files compiled successfully;
+Stop
 @enduml
 ----
 
@@ -484,13 +494,15 @@ The linking process can be visualized as follows:
 [plantuml]
 ----
 @startuml
-start :Iterate over targets;
-    :Generate linker command;
-    if (Linking successful?) then (Yes)
-        :Move to next target;
-    else (No)
-        :Report error; stop
-    endif
+Start
+:Iterate over targets;
+:Generate linker command;
+if (Linking successful?) then (Yes)
+    :Move to next target;
+else (No)
+    :Report error;
+    Stop
+endif
 @enduml
 ----
 
@@ -579,30 +591,35 @@ The overall build process is visaulized as follows:
 [plantuml]
 ----
 @startuml
-start :Initalize build configuration;
-    :Discover source files;
-        if (Source files found?) then (Yes)
-            :Compile source file;
-            :if (Compilation successful?) then (Yes)
-                :Continue;
-            else (No)
-                :Report error; stop
-            endif
-        endif
+Start
+:Initalize build configuration;
+:Discover source files;
+if (Source files found?) then (Yes)
+    :Compile source file;
+    :if (Compilation successful?) then (Yes)
+        :Continue;
+    else (No)
+        :Report error;
+        Stop
+    endif
+endif
+else (No)
+    :Report error (no sources);
+    Stop
+endif
+:Iterate over targets;
+:Check if linking required;
+    if (Rebuild target?) then (Yes)
+        :Link target;
+        if (Linking successful?) then (Yes)
+            :Continue;
         else (No)
-            :Report error (no sources); stop
+            :Report error;
+            Stop
         endif
-        :Iterate over targets;
-            :Check if linking required;
-                if (Rebuild target?) then (Yes)
-                    :Link target;
-                    if (Linking successful?) then (Yes)
-                        :Continue;
-                    else (No)
-                        :Report error; stop
-                    endif
-                endif
-                :Build completed successfully; stop
+    endif
+    :Build completed successfully;
+    Stop
 @enduml
 ----
 
