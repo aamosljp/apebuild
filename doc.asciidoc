@@ -77,7 +77,7 @@ The single header will contain the following:
 The following diagram outlines the flow of the build system:
 
 [plantuml]
-----
+```
 @startuml
 UserConfig --> BuildSystem : Defines Targets
 BuildSystem --> SourceDiscovery : Scans Source Directories
@@ -86,7 +86,7 @@ BuildPlan --> DependencyChecker : Checks Timestamps
 DependencyChecker --> BuildExecutor : Compiles/Rebuilds
 BuildExecutor --> Linker : Links Final Targets
 @enduml
-----
+```
 
 ==== Source File Discovery
 
@@ -248,7 +248,7 @@ int should_rebuild(const char *source, const char *object, const char *dependenc
 
 === Workflow Diagram
 [plantuml]
-----
+```
 @startuml
 Start
 :Check if source file exists;
@@ -278,7 +278,7 @@ else (No)
     endif
 endif
 @enduml
-----
+```
 
 ==== Compilation
 
@@ -376,7 +376,7 @@ gcc -c utils.c -o utils.o
 === Workflow Diagram
 The compilation process can be visualized as follows:
 [plantuml]
-----
+```
 @startuml
 Start
 :Iterate over source files;
@@ -391,7 +391,7 @@ endif
 :All files compiled successfully;
 Stop
 @enduml
-----
+```
 
 ==== Linking
 
@@ -492,7 +492,7 @@ ar rcs libexample.a module1.o module2.o
 === Workflow Diagram
 The linking process can be visualized as follows:
 [plantuml]
-----
+```
 @startuml
 Start
 :Iterate over targets;
@@ -504,7 +504,7 @@ else (No)
     Stop
 endif
 @enduml
-----
+```
 
 ==== Build Execution
 
@@ -589,7 +589,7 @@ void build_project() {
 === Workflow Diagram
 The overall build process is visaulized as follows:
 [plantuml]
-----
+```
 @startuml
 Start
 :Initalize build configuration;
@@ -621,7 +621,7 @@ endif
     :Build completed successfully;
     Stop
 @enduml
-----
+```
 
 === Optional Features
 1. **Verbose Mode**:
