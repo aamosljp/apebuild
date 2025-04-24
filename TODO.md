@@ -1,2 +1,0 @@
-- [ ] Proper documentation/user manual
-- [ ] Make it more cross-platform
